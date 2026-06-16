@@ -8,9 +8,15 @@ import type {
   Technician,
   TicketStatus,
   TechnicianAvailability,
+  ReworkApplication,
 } from "../../shared/types";
 import type { LucideIcon } from "lucide-react";
-import { STATUS_LABELS, SKILL_LABELS } from "../../shared/types";
+import {
+  REWORK_STATUS_COLORS,
+  REWORK_STATUS_LABELS,
+  SKILL_LABELS,
+  STATUS_LABELS,
+} from "../../shared/types";
 import StatusBadge from "@/components/StatusBadge";
 import UrgencyBadge from "@/components/UrgencyBadge";
 import SkillTag from "@/components/SkillTag";
@@ -32,11 +38,17 @@ import {
   History,
   MessageSquarePlus,
   Loader2,
+  RefreshCcw,
+  ThumbsUp,
+  ThumbsDown,
+  RotateCcw,
+  FileCheck2,
+  Eye,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const STATUS_FLOW: Record<TicketStatus, TicketStatus[]> = {
-  pending_assign: [], // 派单会直接进 in_progress
+  pending_assign: [],
   in_progress: ["pending_verify"],
   pending_verify: ["closed"],
   closed: [],
@@ -55,6 +67,28 @@ const NEXT_LABEL: Record<string, { label: string; cls: string; icon: LucideIcon 
   },
 };
 
+const ADMIN_OPERATORS = ["管理员", "调度员A", "调度员B"];
+
+function ReworkStatusBadge({ status }: { status: string }) {
+  const colorMap: Record<string, string> = {
+    amber: "bg-amber-50 text-amber-700 border-amber-200",
+    emerald: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    red: "bg-red-50 text-red-700 border-red-200",
+    slate: "bg-slate-50 text-slate-600 border-slate-200",
+  };
+  const color = (REWORK_STATUS_COLORS as any)[status] ?? "slate";
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium",
+        colorMap[color]
+      )}
+    >
+      {REWORK_STATUS_LABELS[status as keyof typeof REWORK_STATUS_LABELS] ?? status}
+    </span>
+  );
+}
+
 export default function TicketDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -65,11 +99,20 @@ export default function TicketDetail() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [undoSnapshot, setUndoSnapshot] = useState<OperationSnapshot | null>(null);
+  const [reworks, setReworks] = useState<ReworkApplication[]>([]);
+  const [pendingRework, setPendingRework] = useState<ReworkApplication | null>(null);
   const [techs, setTechs] = useState<Technician[]>([]);
   const [availability, setAvailability] = useState<TechnicianAvailability[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [noteText, setNoteText] = useState("");
+
+  const [showApplyModal, setShowApplyModal] = useState(false);
+  const [applyReason, setApplyReason] = useState("");
+
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [reviewAction, setReviewAction] = useState<"approve" | "reject">("approve");
+  const [reviewComment, setReviewComment] = useState("");
 
   const load = async () => {
     setLoading(true);
@@ -84,6 +127,8 @@ export default function TicketDetail() {
       setNotes(d1.data.notes ?? []);
       setAuditLogs(d1.data.auditLogs ?? []);
       setUndoSnapshot(d1.data.undoSnapshot ?? null);
+      setReworks(d1.data.reworks ?? []);
+      setPendingRework(d1.data.pendingRework ?? null);
       setTechs(d2.data ?? []);
       if (d1.data.ticket?.status === "pending_assign") {
         const r3 = await fetch(`/api/tickets/${ticketId}/available-technicians`);
@@ -107,11 +152,16 @@ export default function TicketDetail() {
   }, [ticketId]);
 
   const isClosed = ticket?.status === "closed";
-
-  // ✨ 核心：撤销入口只看快照是否存在，不限 closed 态
-  // 但 closed 态给出额外提示说明回退的是最近一次关闭操作
   const canUndo = undoSnapshot !== null;
   const canAssign = !isClosed && ticket?.status === "pending_assign";
+  const isAdmin = ADMIN_OPERATORS.includes(currentOperator);
+
+  const isTicketCreator = (() => {
+    const createLog = auditLogs.find((a) => a.action === "create");
+    return createLog?.operator === currentOperator;
+  })();
+
+  const canApplyRework = isClosed && !pendingRework && (isTicketCreator || isAdmin);
 
   const handleAssign = async (techId: number) => {
     if (!canAssign) return;
@@ -208,6 +258,97 @@ export default function TicketDetail() {
     }
   };
 
+  const handleApplyRework = async () => {
+    const reason = applyReason.trim();
+    if (reason.length < 5) {
+      showToast("复核原因至少需要5个字符", "error");
+      return;
+    }
+    setBusy("rework-apply");
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}/rework/apply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason, operator: currentOperator }),
+      });
+      const j = await res.json();
+      if (res.ok) {
+        showToast("复核申请已提交，等待审批", "success");
+        setShowApplyModal(false);
+        setApplyReason("");
+        load();
+      } else {
+        showToast("申请失败：" + (j.error ?? "未知错误"), "error");
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleWithdrawRework = async () => {
+    if (!pendingRework) return;
+    if (!confirm("确定撤回复核申请？")) return;
+    setBusy("rework-withdraw");
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}/rework/withdraw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reworkId: pendingRework.id, operator: currentOperator }),
+      });
+      const j = await res.json();
+      if (res.ok) {
+        showToast("已撤回复核申请", "success");
+        load();
+      } else {
+        showToast("撤回失败：" + (j.error ?? "未知错误"), "error");
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const openReviewModal = (action: "approve" | "reject") => {
+    setReviewAction(action);
+    setReviewComment("");
+    setShowReviewModal(true);
+  };
+
+  const handleReviewRework = async () => {
+    if (!pendingRework) return;
+    const comment = reviewComment.trim();
+    if (comment.length < 2) {
+      showToast("审批意见至少需要2个字符", "error");
+      return;
+    }
+    setBusy("rework-review");
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}/rework/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reworkId: pendingRework.id,
+          approved: reviewAction === "approve",
+          comment,
+          operator: currentOperator,
+        }),
+      });
+      const j = await res.json();
+      if (res.ok) {
+        showToast(
+          reviewAction === "approve" ? "复核通过，工单已回到待验收" : "复核已拒绝",
+          "success"
+        );
+        setShowReviewModal(false);
+        setReviewComment("");
+        load();
+      } else {
+        showToast("审批失败：" + (j.error ?? "未知错误"), "error");
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -222,6 +363,9 @@ export default function TicketDetail() {
   }
 
   const nextStates = STATUS_FLOW[ticket.status] ?? [];
+  const canReviewRework = isAdmin && pendingRework !== null;
+  const canWithdrawRework =
+    pendingRework !== null && pendingRework.applicant === currentOperator;
 
   return (
     <div className="space-y-6">
@@ -246,19 +390,89 @@ export default function TicketDetail() {
         </div>
       </div>
 
-      {/* closed 态顶部提示 */}
+      {/* closed 态顶部提示 + 返工申请状态 */}
       {isClosed && (
         <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
           <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
-          <div className="flex-1">
+          <div className="flex-1 space-y-2">
             <div className="font-medium">工单已关闭</div>
-            <div className="mt-0.5 text-emerald-700/90">
-              关闭后<span className="font-semibold">不能改派或直接变更状态</span>，但可使用「撤销」按钮
+            <div className="text-emerald-700/90">
+              关闭后<span className="font-semibold">不能改派或直接变更状态</span>，可使用「撤销」按钮
               回退到关闭前状态（「{undoSnapshot ? STATUS_LABELS[undoSnapshot.previousStatus as TicketStatus] : '—'}」），
-              并留下审计记录。
+              或通过<span className="font-semibold">「申请复核」</span>提交返工审批，并留下审计记录。
             </div>
+            {pendingRework && (
+              <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-white/70 p-2 border border-amber-200">
+                <Eye className="h-4 w-4 text-amber-600" />
+                <span className="font-medium text-amber-700">当前有待审批的复核申请：</span>
+                <ReworkStatusBadge status={pendingRework.status} />
+                <span className="text-xs text-amber-600">
+                  申请人：{pendingRework.applicant} · {new Date(pendingRework.createdAt).toLocaleString("zh-CN")}
+                </span>
+              </div>
+            )}
           </div>
         </div>
+      )}
+
+      {/* Rework History Card */}
+      {reworks.length > 0 && (
+        <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-700">
+            <RefreshCcw className="h-4 w-4" />
+            复核/返工记录 ({reworks.length})
+          </h3>
+          <div className="space-y-3">
+            {reworks.map((r) => (
+              <div
+                key={r.id}
+                className="rounded-lg border border-slate-100 bg-slate-50/50 p-4"
+              >
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <ReworkStatusBadge status={r.status} />
+                    <span className="text-xs text-slate-500">申请 #{r.id}</span>
+                  </div>
+                  <span className="text-xs text-slate-400">
+                    {new Date(r.createdAt).toLocaleString("zh-CN")}
+                  </span>
+                </div>
+                <div className="space-y-1.5 text-sm">
+                  <div className="flex gap-2">
+                    <span className="text-slate-500 shrink-0 w-16">申请人：</span>
+                    <span className="text-slate-700">{r.applicant}</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <span className="text-slate-500 shrink-0 w-16">申请原因：</span>
+                    <span className="text-slate-700">{r.reason}</span>
+                  </div>
+                  {r.reviewer && (
+                    <>
+                      <div className="flex gap-2">
+                        <span className="text-slate-500 shrink-0 w-16">审批人：</span>
+                        <span className="text-slate-700">{r.reviewer}</span>
+                      </div>
+                      {r.reviewComment && (
+                        <div className="flex gap-2">
+                          <span className="text-slate-500 shrink-0 w-16">审批意见：</span>
+                          <span className="text-slate-700">{r.reviewComment}</span>
+                        </div>
+                      )}
+                      {r.reviewedAt && (
+                        <div className="flex gap-2">
+                          <span className="text-slate-500 shrink-0 w-16">审批时间：</span>
+                          <span className="text-slate-700">
+                            {new Date(r.reviewedAt).toLocaleString("zh-CN")}
+                          </span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
       <div className="grid grid-cols-3 gap-6">
@@ -319,7 +533,6 @@ export default function TicketDetail() {
               操作面板
             </h3>
 
-            {/* 状态推进按钮：closed 态不显示（需通过撤销） */}
             {!isClosed && nextStates.length > 0 && (
               <div className="mb-4 flex flex-wrap gap-2">
                 {nextStates.map((s) => {
@@ -348,8 +561,76 @@ export default function TicketDetail() {
               </div>
             )}
 
+            {/* 返工申请操作区 */}
+            {isClosed && (
+              <div className="mb-4 rounded-lg border border-indigo-100 bg-indigo-50/40 p-3">
+                <div className="mb-2 flex items-center gap-2 text-xs font-medium text-indigo-700">
+                  <FileCheck2 className="h-3.5 w-3.5" />
+                  返工复核申请
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {canApplyRework && (
+                    <button
+                      disabled={busy !== null}
+                      onClick={() => setShowApplyModal(true)}
+                      className="inline-flex items-center gap-2 rounded-lg border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-700 shadow-sm transition hover:bg-indigo-50 disabled:opacity-50"
+                    >
+                      {busy === "rework-apply" ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCcw className="h-4 w-4" />
+                      )}
+                      申请复核
+                    </button>
+                  )}
+                  {canWithdrawRework && (
+                    <button
+                      disabled={busy !== null}
+                      onClick={handleWithdrawRework}
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      {busy === "rework-withdraw" ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <RotateCcw className="h-4 w-4" />
+                      )}
+                      撤回申请
+                    </button>
+                  )}
+                  {canReviewRework && (
+                    <>
+                      <button
+                        disabled={busy !== null}
+                        onClick={() => openReviewModal("approve")}
+                        className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50"
+                      >
+                        <ThumbsUp className="h-4 w-4" />
+                        通过复核
+                      </button>
+                      <button
+                        disabled={busy !== null}
+                        onClick={() => openReviewModal("reject")}
+                        className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-red-700 disabled:opacity-50"
+                      >
+                        <ThumbsDown className="h-4 w-4" />
+                        拒绝申请
+                      </button>
+                    </>
+                  )}
+                  {!canApplyRework && !canWithdrawRework && !canReviewRework && (
+                    <span className="text-xs text-slate-500">
+                      {pendingRework
+                        ? "该工单有待审批的复核申请"
+                        : isClosed
+                        ? "只有工单创建人或管理员可以申请复核"
+                        : ""}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="flex flex-wrap gap-2">
-              {/* ✨ 撤销按钮：只要有快照就显示，不排除 closed 态 */}
               <button
                 disabled={!canUndo || busy !== null}
                 onClick={handleUndo}
@@ -380,7 +661,6 @@ export default function TicketDetail() {
                 )}
               </button>
 
-              {/* 改派/派单按钮：closed 态禁用 */}
               {canAssign ? (
                 <span className="inline-flex items-center rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700 border border-blue-200">
                   请在下方「派单面板」选择技师
@@ -400,13 +680,14 @@ export default function TicketDetail() {
               )}
             </div>
 
-            {/* 操作说明 */}
             <div className="mt-5 rounded-lg bg-slate-50 p-3 text-xs text-slate-500 leading-relaxed border border-slate-100">
               <div className="font-medium text-slate-600 mb-1">操作说明</div>
               <ul className="list-disc space-y-0.5 pl-5">
                 <li>状态推进：<span className="font-mono">待派单 → 派单 → 处理中 → 待验收 → 关闭</span></li>
                 <li>可撤销最近一次派单或状态变更（<span className="text-orange-600 font-medium">包含关闭后撤销</span>），撤销操作本身会写入审计日志且不可再撤销</li>
-                <li>已关闭工单<span className="text-red-600 font-medium">不能改派或直接变更状态</span>，需先撤销关闭</li>
+                <li>已关闭工单<span className="text-indigo-600 font-medium">可申请复核</span>（仅创建人或管理员），审批通过后回到「待验收」状态</li>
+                <li>同一工单不能同时有多个待审批的复核申请，审批前可撤回自己的申请</li>
+                <li>已关闭工单<span className="text-red-600 font-medium">不能改派或直接变更状态</span>，需先撤销关闭或复核通过</li>
               </ul>
             </div>
           </section>
@@ -464,7 +745,7 @@ export default function TicketDetail() {
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-400">
                 <AlertTriangle className="mx-auto mb-2 h-5 w-5" />
                 <div>已关闭工单不能改派</div>
-                <div className="mt-1 text-slate-500">如需重新派单，请先撤销关闭</div>
+                <div className="mt-1 text-slate-500">如需重新派单，请先撤销关闭或申请复核</div>
               </div>
             ) : canAssign ? (
               availability.length === 0 ? (
@@ -576,10 +857,18 @@ export default function TicketDetail() {
                           ? "bg-orange-500 ring-2 ring-orange-200"
                           : a.action === "create"
                           ? "bg-blue-500 ring-2 ring-blue-200"
-                          : a.action === "status_change"
+                          : a.action === "status_change" || a.action === "rework_status_rollback"
                           ? "bg-emerald-500 ring-2 ring-emerald-200"
                           : a.action === "assign"
                           ? "bg-violet-500 ring-2 ring-violet-200"
+                          : a.action === "rework_apply"
+                          ? "bg-indigo-500 ring-2 ring-indigo-200"
+                          : a.action === "rework_approve"
+                          ? "bg-teal-500 ring-2 ring-teal-200"
+                          : a.action === "rework_reject"
+                          ? "bg-rose-500 ring-2 ring-rose-200"
+                          : a.action === "rework_withdraw"
+                          ? "bg-slate-500 ring-2 ring-slate-200"
                           : "bg-slate-400 ring-2 ring-slate-200"
                       )}
                     />
@@ -607,6 +896,140 @@ export default function TicketDetail() {
           </section>
         </div>
       </div>
+
+      {/* Apply Rework Modal */}
+      {showApplyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+            <h3 className="mb-4 text-lg font-semibold text-slate-800 flex items-center gap-2">
+              <RefreshCcw className="h-5 w-5 text-indigo-600" />
+              申请复核（返工）
+            </h3>
+            <p className="mb-4 text-sm text-slate-600">
+              工单 <span className="font-mono font-medium">{ticket.ticketNo}</span>{" "}
+              已关闭，请填写复核原因，管理员审批通过后工单将回到「待验收」状态。
+            </p>
+            <div className="mb-4">
+              <label className="mb-1 block text-xs font-medium text-slate-600">
+                复核原因 <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                value={applyReason}
+                onChange={(e) => setApplyReason(e.target.value)}
+                rows={4}
+                placeholder="请详细说明需要返工的原因（至少5个字符）…"
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus:border-indigo-400 focus:bg-white focus:outline-none resize-none"
+              />
+              <div className="mt-1 text-[11px] text-slate-400 text-right">
+                {applyReason.length}/500
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setShowApplyModal(false);
+                  setApplyReason("");
+                }}
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
+              >
+                取消
+              </button>
+              <button
+                disabled={applyReason.trim().length < 5 || busy === "rework-apply"}
+                onClick={handleApplyRework}
+                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {busy === "rework-apply" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                提交申请
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Review Rework Modal */}
+      {showReviewModal && pendingRework && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+            <h3
+              className={cn(
+                "mb-4 text-lg font-semibold flex items-center gap-2",
+                reviewAction === "approve" ? "text-emerald-700" : "text-red-700"
+              )}
+            >
+              {reviewAction === "approve" ? (
+                <ThumbsUp className="h-5 w-5" />
+              ) : (
+                <ThumbsDown className="h-5 w-5" />
+              )}
+              {reviewAction === "approve" ? "通过复核申请" : "拒绝复核申请"}
+            </h3>
+            <div className="mb-4 rounded-lg bg-slate-50 p-3 text-sm">
+              <div className="mb-1 flex items-center justify-between text-xs">
+                <span className="text-slate-500">申请人</span>
+                <span className="font-medium text-slate-700">{pendingRework.applicant}</span>
+              </div>
+              <div className="mb-1 flex items-start justify-between text-xs gap-2">
+                <span className="text-slate-500 shrink-0">申请原因</span>
+                <span className="text-slate-700 text-right flex-1">{pendingRework.reason}</span>
+              </div>
+            </div>
+            <div className="mb-4">
+              <label className="mb-1 block text-xs font-medium text-slate-600">
+                审批意见 <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                value={reviewComment}
+                onChange={(e) => setReviewComment(e.target.value)}
+                rows={3}
+                placeholder={
+                  reviewAction === "approve"
+                    ? "请填写通过复核的意见（至少2个字符）…"
+                    : "请说明拒绝原因（至少2个字符）…"
+                }
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus:border-indigo-400 focus:bg-white focus:outline-none resize-none"
+              />
+              <div className="mt-1 text-[11px] text-slate-400 text-right">
+                {reviewComment.length}/500
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setShowReviewModal(false);
+                  setReviewComment("");
+                }}
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
+              >
+                取消
+              </button>
+              <button
+                disabled={reviewComment.trim().length < 2 || busy === "rework-review"}
+                onClick={handleReviewRework}
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white disabled:opacity-50",
+                  reviewAction === "approve"
+                    ? "bg-emerald-600 hover:bg-emerald-700"
+                    : "bg-red-600 hover:bg-red-700"
+                )}
+              >
+                {busy === "rework-review" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : reviewAction === "approve" ? (
+                  <CheckCircle2 className="h-4 w-4" />
+                ) : (
+                  <XCircle className="h-4 w-4" />
+                )}
+                确认{reviewAction === "approve" ? "通过" : "拒绝"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -621,6 +1044,11 @@ const ACTION_LABEL: Record<string, string> = {
   technician_update: "更新技师",
   technician_delete: "删除技师",
   vacation_create: "新增休假",
+  rework_apply: "申请复核",
+  rework_withdraw: "撤回复核",
+  rework_approve: "通过复核",
+  rework_reject: "拒绝复核",
+  rework_status_rollback: "状态回退(返工)",
 };
 
 function InfoRow({

@@ -78,3 +78,20 @@ export const exportCsvSchema = z.object({
   endDate: z.string().optional(),
   technicianId: z.coerce.number().int().positive().optional(),
 });
+
+export const reworkApplySchema = z.object({
+  reason: z.string().min(5, '复核原因至少需要5个字符').max(500, '复核原因不能超过500个字符'),
+  operator: z.string().min(1, '操作人不能为空'),
+});
+
+export const reworkWithdrawSchema = z.object({
+  reworkId: z.number().int().positive('复核申请ID无效'),
+  operator: z.string().min(1, '操作人不能为空'),
+});
+
+export const reworkReviewSchema = z.object({
+  reworkId: z.number().int().positive('复核申请ID无效'),
+  approved: z.boolean(),
+  comment: z.string().min(2, '审批意见至少需要2个字符').max(500, '审批意见不能超过500个字符'),
+  operator: z.string().min(1, '操作人不能为空'),
+});

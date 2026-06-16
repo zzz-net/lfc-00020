@@ -79,10 +79,25 @@ export function initDatabase() {
       previous_technician_id INTEGER REFERENCES technicians(id)
     );
 
+    CREATE TABLE IF NOT EXISTS rework_applications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ticket_id INTEGER NOT NULL REFERENCES tickets(id),
+      applicant TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      reviewer TEXT,
+      review_comment TEXT,
+      reviewed_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
     CREATE INDEX IF NOT EXISTS idx_tickets_technician ON tickets(technician_id);
     CREATE INDEX IF NOT EXISTS idx_audit_ticket ON audit_logs(ticket_id);
     CREATE INDEX IF NOT EXISTS idx_notes_ticket ON notes(ticket_id);
+    CREATE INDEX IF NOT EXISTS idx_rework_ticket ON rework_applications(ticket_id);
+    CREATE INDEX IF NOT EXISTS idx_rework_status ON rework_applications(status);
   `);
 
   const techCount = db.prepare('SELECT COUNT(*) as c FROM technicians').get() as { c: number };

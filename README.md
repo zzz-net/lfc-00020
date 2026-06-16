@@ -1,57 +1,163 @@
-# React + TypeScript + Vite
+# 维修工单排班工作台
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+本地运行的维修工单管理系统：登记设备报修、管理技师技能与排班、推进工单完整生命周期。
 
-Currently, two official plugins are available:
+## 核心业务规则（重要）
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+### 状态流转
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default tseslint.config({
-  extends: [
-    // Remove ...tseslint.configs.recommended and replace with this
-    ...tseslint.configs.recommendedTypeChecked,
-    // Alternatively, use this for stricter rules
-    ...tseslint.configs.strictTypeChecked,
-    // Optionally, add this for stylistic rules
-    ...tseslint.configs.stylisticTypeChecked,
-  ],
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
+```
+待派单 ──派单──▶ 处理中 ──▶ 待验收 ──▶ 关闭
+                       ▲
+                       │
+              复核通过（返工回退）
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+- 待派单不可直接关闭
+- 状态只可按顺序单向推进
+- **关闭后可通过「申请复核」审批流程回到待验收**
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### ✅ 关闭后仍可撤销最近一次状态变更
 
-export default tseslint.config({
-  extends: [
-    // other configs...
-    // Enable lint rules for React
-    reactX.configs['recommended-typescript'],
-    // Enable lint rules for React DOM
-    reactDom.configs.recommended,
-  ],
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
+- 任何被快照记录的操作（派单 / 状态变更）都可以撤销，**包含关闭操作**
+- 撤销后工单回退到上一步状态（如：关闭 → 待验收），保留原技师
+- 撤销操作本身写入审计日志，并打上 `undoOfId` 标记指向被撤销的记录
+- 撤销操作**不可再次撤销**（一次回退到位，避免循环）
+
+### ✅ 新增：关闭后申请复核（返工链路）
+
+已关闭工单不再只停留在「撤销上一步」，新增完整的复核审批流程：
+
+#### 🔐 权限控制
+- **申请人**：仅工单创建人 或 管理员（`管理员`、`调度员A`、`调度员B`）可发起
+- **审批人**：仅管理员可审批
+
+#### 📋 流程规则
+1. 申请人必须填写复核原因（5-500字符）
+2. 审批前，申请人可**撤回**自己的申请
+3. 审批通过 → 工单状态自动回退至「待验收」，保留原技师
+4. 审批拒绝 → 工单保持「已关闭」不变
+5. **同一工单不可并发挂多条待审批申请**（后端强制拦截）
+
+#### 📝 审计记录节点
+所有操作均写入审计日志，明确记录操作者与时间：
+- `rework_apply` — 提交复核申请
+- `rework_withdraw` — 撤回复核申请
+- `rework_approve` — 审批通过
+- `rework_reject` — 审批拒绝
+- `rework_status_rollback` — 审批通过后，工单状态实际回退
+
+#### 🖥 GUI 展示
+- 详情页顶部显示「当前有待审批的复核申请」状态条
+- 新增「复核/返工记录」卡片：展示所有历史申请、状态、审批人、审批意见与时间线
+- 操作面板中显示对应按钮：申请复核 / 撤回申请 / 通过复核 / 拒绝申请
+- 审计日志时间线使用不同颜色区分各类返工操作
+
+#### 📊 CSV 导出
+导出文件新增 7 列返工相关字段：
+- 返工申请状态、返工申请人、返工申请原因
+- 返工审批人、返工审批意见、返工申请时间、返工审批时间
+
+### ❌ 关闭后不能改派 / 不能直接变更状态
+
+- 已关闭工单如需重新派单或调整，可选择：
+  - **撤销关闭**（快速回退，无需审批）
+  - **申请复核**（审批流程，留下完整记录）
+- 关闭后禁止直接改派（后端 `validateAssign` 校验 + 前端禁用）
+- 关闭后禁止通过状态推进接口直接变更（后端 `changeTicketStatus` 校验）
+
+### 撤销入口的可见性规则
+
+| 条件 | 撤销按钮 | 派单/改派面板 | 状态推进按钮 |
+|------|---------|-------------|------------|
+| `undoSnapshot != null`（不限状态） | ✅ 显示，closed 态额外提示"撤销关闭→待验收" | - | - |
+| `status === closed` | ✅ 显示（上述） | ❌ 禁用，提示"已关闭·不能改派" | ❌ 全部隐藏（需先撤销关闭或复核通过） |
+| `status === pending_assign` | 看快照 | ✅ 可用 | ❌（派单后自动推进） |
+| `status === in_progress` | 看快照 | ❌ 需先撤销派单 | ✅ 提交验收 |
+| `status === pending_verify` | 看快照 | ❌ 需先撤销到待派单 | ✅ 关闭工单 |
+
+### 返工申请 API 接口
+
+| 方法 | 路径 | 说明 | 请求体 |
+|------|------|------|--------|
+| POST | `/api/tickets/:id/rework/apply` | 提交复核申请 | `{ reason, operator }` |
+| POST | `/api/tickets/:id/rework/withdraw` | 撤回复核申请 | `{ reworkId, operator }` |
+| POST | `/api/tickets/:id/rework/review` | 审批（通过/拒绝） | `{ reworkId, approved, comment, operator }` |
+| GET | `/api/tickets/:id` | 工单详情返回 `reworks` 和 `pendingRework` | — |
+
+## 快速开始
+
+```bash
+npm install
+npm run dev          # 同时启动前端(Vite 5178) + 后端(Express 3002)
+# 前端代理 /api -> http://localhost:3002
+```
+
+访问 http://localhost:5178 打开工作台。
+
+## 测试清单（必跑）
+
+见项目根目录的 `test-backend-rework.mjs`：
+
+```bash
+node test-backend-rework.mjs
+```
+
+覆盖场景：
+
+### 基础闭环
+1. 创建 → 派单 → 推进 → 关闭 ✅
+2. **closed 工单不能改派（400）** ✅
+3. **closed 工单不能直接改状态（400）** ✅
+4. **closed 态撤销成功：200，状态回 pending_verify，快照清除** ✅
+5. 撤销后新增 `undo` 审计记录，`undoOfId` 指向被撤销的状态变更 ✅
+6. 撤销后可再次推进到 closed 并重复撤销 ✅
+7. 连续两次撤销失败（撤销本身不可撤销）✅
+
+### 返工复核流程
+8. **非创建人非管理员申请复核被拒（400）** ✅
+9. **创建人申请复核成功（201），状态 pending** ✅
+10. **重复申请被拦截（400），同一工单不可并发多条** ✅
+11. **申请人撤回成功（200），状态 withdrawn** ✅
+12. **撤回后可再次申请** ✅
+13. **非管理员审批被拒（400）** ✅
+14. **管理员审批通过：工单回到 pending_verify，生成回退审计记录** ✅
+15. **管理员审批拒绝：工单保持 closed，记录审批意见** ✅
+
+### 持久化与一致性
+16. SQLite 持久化：重启后申请状态与审计不丢失 ✅
+17. CSV 导出含返工申请 7 列字段，数据一致 ✅
+
+GUI 验证点：
+- 详情页 `status=closed` 时：**撤销按钮可见**、派单面板禁用、无状态推进按钮
+- 详情页提示文案包含"关闭后不能改派或直接变更状态，但可使用撤销或申请复核"
+- 已关闭工单显示「申请复核」按钮，待审批时显示「撤回」和「审批」按钮
+- 「复核/返工记录」卡片展示历史申请及时间线
+- 审计日志时间线显示返工相关操作且颜色区分
+
+## 架构
+
+```
+前端 (Vite + React + Tailwind + Zustand)
+    │  /api 代理
+后端 (Express + better-sqlite3)
+    │
+SQLite 文件: ./data/app.db   # 重启不丢数据
+```
+
+### 新增数据表
+
+```sql
+rework_applications (
+  id              INTEGER PK
+  ticket_id       INTEGER FK → tickets.id
+  applicant       TEXT    -- 申请人
+  reason          TEXT    -- 复核原因
+  status          TEXT    -- pending/approved/rejected/withdrawn
+  reviewer        TEXT    -- 审批人
+  review_comment  TEXT    -- 审批意见
+  reviewed_at     TEXT    -- 审批时间
+  created_at      TEXT
+  updated_at      TEXT
+)
 ```

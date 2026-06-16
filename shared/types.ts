@@ -1,5 +1,7 @@
 export type TicketStatus = 'pending_assign' | 'in_progress' | 'pending_verify' | 'closed';
 
+export type ReworkStatus = 'pending' | 'approved' | 'rejected' | 'withdrawn';
+
 export type Urgency = 'low' | 'medium' | 'high' | 'critical';
 
 export type Skill =
@@ -21,7 +23,12 @@ export type AuditAction =
   | 'technician_create'
   | 'technician_update'
   | 'technician_delete'
-  | 'vacation_create';
+  | 'vacation_create'
+  | 'rework_apply'
+  | 'rework_withdraw'
+  | 'rework_approve'
+  | 'rework_reject'
+  | 'rework_status_rollback';
 
 export interface Technician {
   id: number;
@@ -98,6 +105,19 @@ export interface TechnicianAvailability {
   missingSkills: Skill[];
 }
 
+export interface ReworkApplication {
+  id: number;
+  ticketId: number;
+  applicant: string;
+  reason: string;
+  status: ReworkStatus;
+  reviewer?: string;
+  reviewComment?: string;
+  reviewedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export const SKILL_LABELS: Record<Skill, string> = {
   air_conditioner: '空调维修',
   refrigerator: '冰箱维修',
@@ -121,6 +141,20 @@ export const URGENCY_LABELS: Record<Urgency, string> = {
   medium: '中',
   high: '高',
   critical: '紧急',
+};
+
+export const REWORK_STATUS_LABELS: Record<ReworkStatus, string> = {
+  pending: '待审批',
+  approved: '已通过',
+  rejected: '已拒绝',
+  withdrawn: '已撤回',
+};
+
+export const REWORK_STATUS_COLORS: Record<ReworkStatus, string> = {
+  pending: 'amber',
+  approved: 'emerald',
+  rejected: 'red',
+  withdrawn: 'slate',
 };
 
 export const TICKET_REQUIRED_SKILLS_MAP: Record<string, Skill[]> = {

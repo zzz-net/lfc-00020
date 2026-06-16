@@ -5,6 +5,9 @@ import {
   assignTicketSchema,
   changeStatusSchema,
   createTicketSchema,
+  reworkApplySchema,
+  reworkReviewSchema,
+  reworkWithdrawSchema,
   undoSchema,
 } from '../validators.js';
 import {
@@ -20,6 +23,13 @@ import {
 } from '../services/tickets.js';
 import { getAuditLogsByTicket } from '../services/audit.js';
 import { checkTechnicianAvailability } from '../services/availability.js';
+import {
+  applyRework,
+  getPendingRework,
+  getReworkByTicket,
+  reviewRework,
+  withdrawRework,
+} from '../services/rework.js';
 import type { TicketStatus } from '../../shared/types.js';
 
 const router = Router();
@@ -57,7 +67,9 @@ router.get('/:id', (req, res) => {
     const notes = getNotesByTicket(id);
     const auditLogs = getAuditLogsByTicket(id);
     const undoSnapshot = getUndoSnapshot(id);
-    res.json({ data: { ticket, notes, auditLogs, undoSnapshot } });
+    const reworks = getReworkByTicket(id);
+    const pendingRework = getPendingRework(id);
+    res.json({ data: { ticket, notes, auditLogs, undoSnapshot, reworks, pendingRework } });
   } catch (err) {
     _handleError(res, err);
   }
@@ -133,6 +145,42 @@ router.get('/:id/available-technicians', (req, res) => {
       title: ticket.title,
       description: ticket.description,
     });
+    res.json({ data: result });
+  } catch (err) {
+    _handleError(res, err);
+  }
+});
+
+router.post('/:id/rework/apply', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: '无效的工单ID' });
+    const parsed = reworkApplySchema.parse(req.body) as any;
+    const rework = applyRework(id, parsed.operator, parsed.reason);
+    res.status(201).json({ data: rework });
+  } catch (err) {
+    _handleError(res, err);
+  }
+});
+
+router.post('/:id/rework/withdraw', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: '无效的工单ID' });
+    const parsed = reworkWithdrawSchema.parse(req.body) as any;
+    const rework = withdrawRework(id, parsed.reworkId, parsed.operator);
+    res.json({ data: rework });
+  } catch (err) {
+    _handleError(res, err);
+  }
+});
+
+router.post('/:id/rework/review', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: '无效的工单ID' });
+    const parsed = reworkReviewSchema.parse(req.body) as any;
+    const result = reviewRework(id, parsed.reworkId, parsed.approved, parsed.comment, parsed.operator);
     res.json({ data: result });
   } catch (err) {
     _handleError(res, err);
