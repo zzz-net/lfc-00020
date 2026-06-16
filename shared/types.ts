@@ -1,0 +1,142 @@
+export type TicketStatus = 'pending_assign' | 'in_progress' | 'pending_verify' | 'closed';
+
+export type Urgency = 'low' | 'medium' | 'high' | 'critical';
+
+export type Skill =
+  | 'air_conditioner'
+  | 'refrigerator'
+  | 'washing_machine'
+  | 'computer'
+  | 'network'
+  | 'plumbing'
+  | 'electrical'
+  | 'elevator';
+
+export type AuditAction =
+  | 'create'
+  | 'assign'
+  | 'status_change'
+  | 'undo'
+  | 'note_add'
+  | 'technician_create'
+  | 'technician_update'
+  | 'technician_delete'
+  | 'vacation_create';
+
+export interface Technician {
+  id: number;
+  name: string;
+  employeeId: string;
+  skills: Skill[];
+  dailyLimit: number;
+  createdAt: string;
+}
+
+export interface Vacation {
+  id: number;
+  technicianId: number;
+  startDate: string;
+  endDate: string;
+  reason?: string;
+}
+
+export interface Ticket {
+  id: number;
+  ticketNo: string;
+  title: string;
+  location: string;
+  description: string;
+  contactName: string;
+  contactPhone: string;
+  urgency: Urgency;
+  expectedDate: string;
+  status: TicketStatus;
+  technicianId?: number;
+  technicianName?: string;
+  assignedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Note {
+  id: number;
+  ticketId: number;
+  operator: string;
+  content: string;
+  createdAt: string;
+}
+
+export interface AuditLog {
+  id: number;
+  ticketId?: number;
+  operator: string;
+  action: AuditAction;
+  beforeData?: string;
+  afterData?: string;
+  description: string;
+  createdAt: string;
+  undoOfId?: number;
+}
+
+export interface OperationSnapshot {
+  id: number;
+  ticketId: number;
+  auditLogId: number;
+  previousStatus: TicketStatus;
+  previousTechnicianId?: number;
+}
+
+export interface TechnicianAvailability {
+  technician: Technician;
+  available: boolean;
+  reasons: string[];
+  dailyAssignedCount: number;
+  hasOverlap: boolean;
+  onVacation: boolean;
+  skillMatch: boolean;
+  matchedSkills: Skill[];
+  missingSkills: Skill[];
+}
+
+export const SKILL_LABELS: Record<Skill, string> = {
+  air_conditioner: '空调维修',
+  refrigerator: '冰箱维修',
+  washing_machine: '洗衣机维修',
+  computer: '电脑维修',
+  network: '网络维护',
+  plumbing: '水管维修',
+  electrical: '电工维修',
+  elevator: '电梯维修',
+};
+
+export const STATUS_LABELS: Record<TicketStatus, string> = {
+  pending_assign: '待派单',
+  in_progress: '处理中',
+  pending_verify: '待验收',
+  closed: '已关闭',
+};
+
+export const URGENCY_LABELS: Record<Urgency, string> = {
+  low: '低',
+  medium: '中',
+  high: '高',
+  critical: '紧急',
+};
+
+export const TICKET_REQUIRED_SKILLS_MAP: Record<string, Skill[]> = {
+  空调: ['air_conditioner'],
+  制冷: ['air_conditioner'],
+  冰箱: ['refrigerator'],
+  洗衣机: ['washing_machine'],
+  电脑: ['computer'],
+  网络: ['network'],
+  上网: ['network'],
+  WiFi: ['network'],
+  水管: ['plumbing'],
+  漏水: ['plumbing'],
+  下水: ['plumbing'],
+  电: ['electrical'],
+  电路: ['electrical'],
+  插座: ['electrical'],
+  电梯: ['elevator'],
+};
