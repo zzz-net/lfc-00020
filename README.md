@@ -1,288 +1,57 @@
-# 维修工单排班工作台
+# React + TypeScript + Vite
 
-一个本地可运行的维修工单管理系统，支持工单全生命周期流转、技师智能派单、操作撤销和审计追踪。
+This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
-## 技术栈
+Currently, two official plugins are available:
 
-- **前端**: React 18 + TypeScript + Vite + Tailwind CSS + Zustand + React Router
-- **后端**: Express 4 + TypeScript + better-sqlite3 + Zod
-- **数据库**: SQLite（本地文件存储，数据持久化）
-- **其他**: lucide-react 图标、concurrently 并发启动
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
 
-## 快速开始
+## Expanding the ESLint configuration
 
-### 安装依赖
+If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
 
-```bash
-npm install
+```js
+export default tseslint.config({
+  extends: [
+    // Remove ...tseslint.configs.recommended and replace with this
+    ...tseslint.configs.recommendedTypeChecked,
+    // Alternatively, use this for stricter rules
+    ...tseslint.configs.strictTypeChecked,
+    // Optionally, add this for stylistic rules
+    ...tseslint.configs.stylisticTypeChecked,
+  ],
+  languageOptions: {
+    // other options...
+    parserOptions: {
+      project: ['./tsconfig.node.json', './tsconfig.app.json'],
+      tsconfigRootDir: import.meta.dirname,
+    },
+  },
+})
 ```
 
-### 启动开发服务
+You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
 
-```bash
-npm run dev
+```js
+// eslint.config.js
+import reactX from 'eslint-plugin-react-x'
+import reactDom from 'eslint-plugin-react-dom'
+
+export default tseslint.config({
+  extends: [
+    // other configs...
+    // Enable lint rules for React
+    reactX.configs['recommended-typescript'],
+    // Enable lint rules for React DOM
+    reactDom.configs.recommended,
+  ],
+  languageOptions: {
+    // other options...
+    parserOptions: {
+      project: ['./tsconfig.node.json', './tsconfig.app.json'],
+      tsconfigRootDir: import.meta.dirname,
+    },
+  },
+})
 ```
-
-启动后访问：
-- 前端页面: http://localhost:5173 （如端口被占用会自动顺延）
-- 后端 API: http://localhost:3002
-
-### 类型检查
-
-```bash
-npm run check
-```
-
-## 目录结构
-
-```
-.
-├── api/                    # 后端代码
-│   ├── services/           # 业务逻辑层
-│   ├── routes/             # 路由层
-│   ├── db.ts               # 数据库初始化
-│   ├── validators.ts       # Zod 校验 schema
-│   ├── app.ts              # Express 应用
-│   └── server.ts           # 服务入口
-├── src/                    # 前端代码
-│   ├── components/         # 公共组件
-│   ├── pages/              # 页面
-│   ├── api/                # API 客户端
-│   ├── store/              # 全局状态
-│   └── App.tsx             # 应用入口
-├── shared/                 # 前后端共享类型
-├── data/                   # SQLite 数据库文件
-└── README.md
-```
-
-## 样例数据
-
-首次启动会自动注入以下样例数据：
-
-### 技师列表
-
-| 工号 | 姓名 | 技能 | 日接单上限 |
-|------|------|------|------------|
-| T001 | 张伟 | 空调维修、冰箱维修、电工维修 | 3 |
-| T002 | 李娜 | 电脑维修、网络维修、电工维修 | 4 |
-| T003 | 王强 | 管道疏通、电梯维修、洗衣机维修 | 2 |
-
-### 工单列表
-
-| 工单号 | 标题 | 地点 | 紧急程度 | 状态 |
-|--------|------|------|----------|------|
-| WO-2026-0001 | 3楼空调不制冷 | 研发中心3楼301 | 高 | 待派单 |
-| WO-2026-0002 | 会议室投影仪无法开机 | 行政楼2楼大会议室 | 中 | 待派单 |
-
-### 技能匹配规则
-
-系统会根据工单标题和描述自动推断所需技能：
-
-| 关键词 | 所需技能 |
-|--------|----------|
-| 空调 | air_conditioner |
-| 冰箱/冷柜 | refrigerator |
-| 电脑/打印机/投影仪 | computer |
-| 网络/路由器/WiFi | network |
-| 水管/下水道/马桶/漏水 | plumbing |
-| 电梯 | elevator |
-| 洗衣机 | washing_machine |
-| 电路/电灯/插座/断电 | electrical |
-
-## 功能验证步骤
-
-### 一、正常链路验证
-
-#### 1. 新建报修
-
-1. 点击左侧菜单「新建工单」
-2. 填写表单：
-   - 标题：打印机卡纸
-   - 地点：行政楼1楼前台
-   - 故障描述：HP打印机频繁卡纸
-   - 联系人：张小姐
-   - 联系电话：13900000001
-   - 紧急程度：低
-   - 期望完成日期：明天
-3. 点击「提交工单」
-4. 预期：创建成功，跳转到工单详情页
-
-#### 2. 派单给合适技师
-
-1. 在工作台「待派单」列点击任一张工单
-2. 在右侧「派单」面板查看可用技师列表
-   - 系统会自动筛选：技能匹配、不在休假、未达日接单量、无时间冲突
-3. 选择一位技师，点击「派单」
-4. 预期：派单成功，状态变为「处理中」，技师信息显示在工单上
-
-#### 3. 推进状态
-
-1. 在工单详情页，点击「推进状态」按钮
-2. 选择下一状态并填写备注（可选）
-3. 状态流转路径：待派单 → 处理中 → 待验收 → 已关闭
-4. 预期：每次推进都有审计记录
-
-#### 4. 补充备注
-
-1. 在工单详情页底部「备注」区域
-2. 输入备注内容，点击「添加备注」
-3. 预期：备注列表中新增一条，带操作人和时间
-
-#### 5. 导出历史数据
-
-1. 点击左侧菜单「导出中心」
-2. 选择筛选条件（日期范围、技师）
-3. 点击「导出 CSV」
-4. 预期：下载 CSV 文件，可用 Excel 打开（带 UTF-8 BOM，中文正常显示）
-
-### 二、失败场景复现
-
-#### 1. 缺少联系人不能建单
-
-1. 点击「新建工单」
-2. 填写除「联系人」外的所有字段
-3. 点击「提交工单」
-4. 预期：表单报错，提示「请输入联系人」，无法提交
-
-#### 2. 技能不匹配不能派单
-
-1. 打开「3楼空调不制冷」工单（需要空调维修技能）
-2. 查看可用技师列表
-3. 预期：只有张伟（有空调技能）在可用列表中
-   - 王强（管道/电梯）不会出现在可用列表中
-   - 尝试用 API 直接派给王强会返回错误：「技能不匹配」
-
-验证命令（可选）：
-```bash
-curl -X POST http://localhost:3002/api/tickets/1/assign \
-  -H "Content-Type: application/json" \
-  -d '{"technicianId":3,"operator":"测试员"}'
-```
-
-#### 3. 时间冲突/单日接单量超限不能派单
-
-1. 给张伟连续派 3 张同一天的工单（达到日上限 3）
-2. 再尝试派第 4 张同一天的工单给张伟
-3. 预期：派单失败，提示「该技师当日已达接单上限」
-
-#### 4. 新建工单不能直接关闭
-
-1. 打开一张「待派单」状态的工单
-2. 查看状态推进按钮
-3. 预期：没有直接跳到「已关闭」的选项
-   - 必须按 待派单→处理中→待验收→已关闭 顺序流转
-   - 用 API 直接改 closed 会报错
-
-#### 5. 关闭后不能改派
-
-1. 把一张工单推进到「已关闭」状态
-2. 查看派单面板
-3. 预期：派单按钮被禁用，提示「已关闭工单不能改派」
-
-### 三、撤销功能验证
-
-#### 1. 撤销派单
-
-1. 给一张工单派单（状态变为处理中）
-2. 点击「撤销上一步」按钮
-3. 预期：
-   - 状态回到「待派单」
-   - 技师信息被清空
-   - 审计日志中新增一条「撤销操作」记录
-
-#### 2. 撤销状态变更
-
-1. 把工单从「处理中」推进到「待验收」
-2. 点击「撤销上一步」按钮
-3. 预期：状态回到「处理中」，审计日志有撤销记录
-
-#### 3. 连续撤销限制
-
-1. 撤销一次后，再次点击「撤销上一步」
-2. 预期：只能撤销最近一次操作，不能连续撤销历史操作
-
-### 四、数据持久化验证
-
-1. 进行一些操作（新建工单、派单、推进状态、撤销）
-2. 记下当前的工单状态、审计日志数量
-3. 停止服务（Ctrl+C）
-4. 重新启动：`npm run dev`
-5. 刷新页面
-6. 预期：
-   - 所有工单状态和重启前一致
-   - 审计日志数量和内容一致
-   - 撤销痕迹保留
-   - 操作人、备注信息完整
-   - CSV 导出内容和重启前一致
-
-数据库文件位置：`data/app.db`
-
-## 审计日志
-
-所有操作都会记录审计日志，可在「审计日志」页面查看：
-
-- 操作类型：创建、派单、状态变更、撤销、备注
-- 记录内容：操作人、操作时间、前后数据快照、操作描述
-- 撤销操作会关联到被撤销的原始操作
-
-## API 接口
-
-### 工单
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | /api/tickets | 获取工单列表 |
-| GET | /api/tickets/:id | 获取工单详情（含备注、审计日志、撤销快照） |
-| POST | /api/tickets | 创建工单 |
-| POST | /api/tickets/:id/assign | 派单 |
-| PATCH | /api/tickets/:id/status | 变更状态 |
-| POST | /api/tickets/:id/undo | 撤销上一步操作 |
-| POST | /api/tickets/:id/notes | 添加备注 |
-| GET | /api/tickets/:id/available-technicians | 获取可用技师列表 |
-
-### 技师
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | /api/technicians | 获取技师列表 |
-| GET | /api/technicians/:id | 获取技师详情 |
-| POST | /api/technicians | 新增技师 |
-| PATCH | /api/technicians/:id | 更新技师 |
-| DELETE | /api/technicians/:id | 删除技师 |
-| POST | /api/technicians/:id/vacations | 添加休假 |
-
-### 其他
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | /api/audit | 获取审计日志 |
-| GET | /api/export/csv | 导出工单 CSV |
-| GET | /api/health | 健康检查 |
-
-## 核心设计
-
-### 状态机
-
-```
-pending_assign (待派单)
-    ↓
-in_progress (处理中)
-    ↓
-pending_verify (待验收)
-    ↓
-closed (已关闭)
-```
-
-### 派单校验四项
-
-1. **技能匹配**：根据工单关键词推断所需技能，技师必须全部具备
-2. **休假检查**：技师在期望日期不能处于休假状态
-3. **单日接单量**：当日已派单数量不能超过技师日上限
-4. **时间重叠**：同一技师同一天不能有两张未完成的工单
-
-### 撤销机制
-
-- 每个工单只保留最近一次可撤销操作的快照
-- 撤销操作本身也会写入审计日志
-- 已撤销的操作不能再次撤销
-- 已关闭的工单不能撤销

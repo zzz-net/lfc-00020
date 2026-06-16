@@ -1,0 +1,154 @@
+﻿
+=== 1. Available technicians ===
+[
+  {
+    "id": 1,
+    "name": "寮犱紵",
+    "skills": [
+      "air_conditioner",
+      "refrigerator",
+      "electrical"
+    ],
+    "dailyLimit": 3
+  },
+  {
+    "id": 2,
+    "name": "鏉庡",
+    "skills": [
+      "computer",
+      "network",
+      "electrical"
+    ],
+    "dailyLimit": 4
+  },
+  {
+    "id": 3,
+    "name": "鐜嬪己",
+    "skills": [
+      "plumbing",
+      "elevator",
+      "washing_machine"
+    ],
+    "dailyLimit": 2
+  }
+]
+
+=== 閫夋嫨 ===
+{
+  "techId": 3,
+  "expectedDate": "2026-06-20",
+  "reason": "閬垮厤寮犱紵鏄庡ぉ浼戝亣锛岄€夌帇寮?4澶╁悗鏃ユ湡"
+}
+
+=== 2. Create ticket (match 鐜嬪己:鐢垫) ===
+{
+  "status": 201,
+  "id": 7
+}
+
+=== 3. Assign -> 鐜嬪己 ===
+{
+  "status": 400,
+  "error": "鎶€鑳戒笉鍖归厤锛氱己灏?electrical"
+}
+
+=== 4. in_progress -> pending_verify ===
+{
+  "status": 400,
+  "error": "涓嶈兘浠庛€宲ending_assign銆嶇洿鎺ュ彉鏇翠负銆宲ending_verify銆?
+}
+
+=== 5. pending_verify -> closed ===
+{
+  "status": 400,
+  "error": "涓嶈兘浠庛€宲ending_assign銆嶇洿鎺ュ彉鏇翠负銆宑losed銆?
+}
+
+=== 6. 鉁旓笍 Closed assign MUST FAIL (涓嶈兘鏀规淳) ===
+{
+  "status": 400,
+  "error": "鎶€鑳戒笉鍖归厤锛氱己灏?electrical"
+}
+
+=== 7. 鉁旓笍 Closed direct status change MUST FAIL ===
+{
+  "status": 400,
+  "error": "涓嶈兘浠庛€宲ending_assign銆嶇洿鎺ュ彉鏇翠负銆宲ending_verify銆?
+}
+
+=== 8. Detail before undo - closed + snapshot + audit ===
+{
+  "ticketStatus": "pending_assign",
+  "undoSnapshot": null,
+  "auditCount": 1,
+  "lastAudit": {
+    "id": 16,
+    "action": "create",
+    "desc": "鍒涘缓宸ュ崟 WO-2026-0007"
+  }
+}
+
+=== 9. 鉁║NDO closed (鏍稿績锛屽繀椤?00) ===
+{
+  "status": 400,
+  "error": "娌℃湁鍙挙閿€鐨勬搷浣?,
+  "revertedStatus": null,
+  "technicianName": null
+}
+
+=== 10. After undo: audit + snapshot ===
+{
+  "ticketStatus": "pending_assign",
+  "undoSnapshot": null,
+  "auditCount": 1,
+  "audits": [
+    {
+      "id": 16,
+      "action": "create",
+      "desc": "鍒涘缓宸ュ崟 WO-2026-0007",
+      "undoOfId": null
+    }
+  ]
+}
+
+=== 11. Re-close (pending_verify -> closed) ===
+{
+  "status": 400,
+  "error": "涓嶈兘浠庛€宲ending_assign銆嶇洿鎺ュ彉鏇翠负銆宑losed銆?
+}
+
+=== 12. Undo again (2nd time) ===
+{
+  "status": 400,
+  "error": "娌℃湁鍙挙閿€鐨勬搷浣?,
+  "revertedStatus": null
+}
+
+=== 13. 鉁旓笍 Double undo MUST FAIL (鎾ら攢鏈韩涓嶅彲鎾ら攢) ===
+{
+  "status": 400,
+  "error": "娌℃湁鍙挙閿€鐨勬搷浣?
+}
+
+=== 14. CSV export ===
+{
+  "status": 200,
+  "bytes": 1109,
+  "firstLine": "宸ュ崟缂栧彿,鏍囬,鍦扮偣,鏁呴殰鎻忚堪,鑱旂郴浜?鑱旂郴鐢佃瘽,绱ф€ョ▼搴?鏈熸湜瀹屾垚鏃ユ湡,鐘舵€?鎸囨淳鎶€甯?鎶€甯堝伐鍙?鎶€甯堟妧鑳?娲惧崟鏃堕棿,鍒涘缓鏃堕棿,鏇存柊鏃堕棿",
+  "hasTestTicket": true
+}
+
+========== 鏂█姹囨€?==========
+node : SyntaxError: Unexpected end of JSON input
+所在位置 行:1 字符: 5
++ & { node test-backend-undo-v2.mjs 2>&1 | Out-File -FilePath backend-t ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (SyntaxError: Un...d of JSON input 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    at JSON.parse (<anonymous>)
+    at main (file:///D:/workSpace/AI__SPACE/lfc-00020/test-backend-undo-v2.mjs:
+162:22)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:
+5)

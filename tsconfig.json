@@ -26,9 +26,6 @@
     "paths": {
       "@/*": [
         "./src/*"
-      ],
-      "@shared/*": [
-        "./shared/*"
       ]
     },
     "types": [
@@ -38,7 +35,6 @@
   },
   "include": [
     "src",
-    "api",
-    "shared"
+    "api"
   ]
 }

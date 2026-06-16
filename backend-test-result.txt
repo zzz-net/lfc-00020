@@ -1,0 +1,176 @@
+﻿
+=== 1. Health check ===
+{
+  "status": 200,
+  "json": {
+    "success": true,
+    "message": "ok"
+  }
+}
+
+=== 2. Tickets list (count) ===
+{
+  "count": 5,
+  "first": {
+    "id": 5,
+    "ticketNo": "WO-2026-0005",
+    "title": "????-????",
+    "location": "A?204",
+    "description": "????????????",
+    "contactName": "?????",
+    "contactPhone": "13900000014",
+    "urgency": "medium",
+    "expectedDate": "2026-06-25",
+    "status": "pending_assign",
+    "createdAt": "2026-06-16T17:58:09.856Z",
+    "updatedAt": "2026-06-16T17:58:09.856Z"
+  }
+}
+
+=== 3. Create ticket ===
+{
+  "status": 201,
+  "json": {
+    "data": {
+      "id": 6,
+      "ticketNo": "WO-2026-0006",
+      "title": "銆愭祴璇曘€戝叧闂悗鎾ら攢楠岃瘉-1781650454530",
+      "location": "娴嬭瘯妤?灞?,
+      "description": "绌鸿皟涓嶅埗鍐凤紝闇€瑕佺淮淇?,
+      "contactName": "娴嬭瘯鍛?,
+      "contactPhone": "13800000000",
+      "urgency": "high",
+      "expectedDate": "2026-06-17",
+      "status": "pending_assign",
+      "createdAt": "2026-06-16T22:54:14.572Z",
+      "updatedAt": "2026-06-16T22:54:14.572Z"
+    }
+  }
+}
+
+=== 4. Technicians list ===
+{
+  "count": 3,
+  "first3": [
+    {
+      "id": 1,
+      "name": "寮犱紵",
+      "employeeId": "T001",
+      "skills": [
+        "air_conditioner",
+        "refrigerator",
+        "electrical"
+      ],
+      "dailyLimit": 3,
+      "createdAt": "2026-06-16 17:03:15"
+    },
+    {
+      "id": 2,
+      "name": "鏉庡",
+      "employeeId": "T002",
+      "skills": [
+        "computer",
+        "network",
+        "electrical"
+      ],
+      "dailyLimit": 4,
+      "createdAt": "2026-06-16 17:03:15"
+    },
+    {
+      "id": 3,
+      "name": "鐜嬪己",
+      "employeeId": "T003",
+      "skills": [
+        "plumbing",
+        "elevator",
+        "washing_machine"
+      ],
+      "dailyLimit": 2,
+      "createdAt": "2026-06-16 17:03:15"
+    }
+  ]
+}
+
+=== 5. Assign ticket ===
+{
+  "status": 400
+}
+
+=== 6. Status in_progress -> pending_verify ===
+{
+  "status": 400
+}
+
+=== 7. Status pending_verify -> closed ===
+{
+  "status": 400
+}
+
+=== 8. Closed assign (should fail 400) ===
+{
+  "status": 400,
+  "error": "璇ユ妧甯堝湪 2026-06-17 澶勪簬浼戝亣涓?
+}
+
+=== 9. Closed direct status change (should fail 400) ===
+{
+  "status": 400,
+  "error": "涓嶈兘浠庛€宲ending_assign銆嶇洿鎺ュ彉鏇翠负銆宲ending_verify銆?
+}
+
+=== 10. Ticket detail before undo ===
+{
+  "ticketStatus": "pending_assign",
+  "undoSnapshot": null,
+  "auditCount": 1,
+  "lastAudit": {
+    "id": 15,
+    "ticketId": 6,
+    "operator": "娴嬭瘯璋冨害鍛?,
+    "action": "create",
+    "afterData": "{\"id\":6,\"ticketNo\":\"WO-2026-0006\",\"title\":\"銆愭祴璇曘€戝叧闂悗鎾ら攢楠岃瘉-1781650454530\",\"location\":\"娴嬭瘯妤?灞俓",\"description\":\"绌鸿皟涓嶅埗鍐凤紝闇€瑕佺淮淇甛",\"contactName\":\"娴嬭瘯鍛榎",\"contactPhone\":\"13800000000\",\"urgency\":\"high\",\"expectedDate\":\"2026-06-17\",\"status\":\"pending_assign\",\"createdAt\":\"2026-06-16T22:54:14.572Z\",\"updatedAt\":\"2026-06-16T22:54:14.572Z\"}",
+    "description": "鍒涘缓宸ュ崟 WO-2026-0006",
+    "createdAt": "2026-06-16T22:54:14.572Z"
+  }
+}
+
+=== 11. UNDO closed (鏍稿績娴嬭瘯) ===
+{
+  "status": 400,
+  "error": "娌℃湁鍙挙閿€鐨勬搷浣?
+}
+
+=== 12. After undo - status + audit ===
+{
+  "ticketStatus": "pending_assign",
+  "undoSnapshot": null,
+  "auditCount": 1,
+  "audits": [
+    {
+      "id": 15,
+      "action": "create",
+      "desc": "鍒涘缓宸ュ崟 WO-2026-0006"
+    }
+  ]
+}
+
+=== 13. Re-close (pending_verify -> closed) ===
+{
+  "status": 400
+}
+
+=== 14. Undo again ===
+{
+  "status": 400,
+  "error": "娌℃湁鍙挙閿€鐨勬搷浣?
+}
+
+=== 15. CSV export ===
+{
+  "status": 200,
+  "contentLength": 961,
+  "preview": "宸ュ崟缂栧彿,鏍囬,鍦扮偣,鏁呴殰鎻忚堪,鑱旂郴浜?鑱旂郴鐢佃瘽,绱ф€ョ▼搴?鏈熸湜瀹屾垚鏃ユ湡,鐘舵€?鎸囨淳鎶€甯?鎶€甯堝伐鍙?鎶€甯堟妧鑳?娲惧崟鏃堕棿,鍒涘缓鏃堕棿,鏇存柊鏃堕棿\r\nWO-2026-0006,銆愭祴璇曘€戝叧闂悗鎾ら攢楠岃瘉-1781650454530,娴嬭瘯妤?灞?绌鸿皟涓嶅埗鍐凤紝闇€瑕佺淮淇?娴嬭瘯鍛?13800000000,楂?2026-06-17,寰呮淳鍗?,,,,2026-06-16T22:54:14.572Z,2026-06-16T22:54:14.572Z\r\nWO-2026-0005,????-????,A?204,????????????,?????,13900000014,涓?2026-06-25,寰呮淳鍗?,,,,2026"
+}
+
+馃弫 鍏ㄩ儴娴嬭瘯姝ラ鎵ц瀹屾垚
+娴嬭瘯宸ュ崟ID: 6

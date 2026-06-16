@@ -1,0 +1,214 @@
+﻿
+=== 娴嬭瘯鍙傛暟 ===
+{
+  "tech": "鐜嬪己(id=3) plumbing/elevator/washing_machine",
+  "expectedDate": "2026-06-22",
+  "title": "姘寸婕忔按"
+}
+
+=== 1. Create ===
+{
+  "status": 201,
+  "id": 10
+}
+
+[ASSERT] 鉁?鍒涘缓宸ュ崟鎴愬姛 - status=201
+
+=== 2. Assign ===
+{
+  "status": 200,
+  "ticketStatus": "in_progress"
+}
+
+[ASSERT] 鉁?娲惧崟鎴愬姛 in_progress - err=
+
+=== 3. -> pending_verify ===
+{
+  "status": 200,
+  "s": "pending_verify"
+}
+
+[ASSERT] 鉁?鎺ㄨ繘 pending_verify
+
+=== 4. -> closed ===
+{
+  "status": 200,
+  "s": "closed"
+}
+
+[ASSERT] 鉁?鎺ㄨ繘 closed
+
+=== 5. Closed assign MUST FAIL ===
+{
+  "status": 400,
+  "err": "宸插叧闂伐鍗曚笉鑳芥敼娲?
+}
+
+[ASSERT] 鉁?closed 涓嶈兘鏀规淳 (400) - err=宸插叧闂伐鍗曚笉鑳芥敼娲?
+=== 6. Closed status change MUST FAIL ===
+{
+  "status": 400,
+  "err": "宸插叧闂伐鍗曚笉鑳藉彉鏇寸姸鎬?
+}
+
+[ASSERT] 鉁?closed 涓嶈兘鐩存帴鍙樻洿鐘舵€?(400) - err=宸插叧闂伐鍗曚笉鑳藉彉鏇寸姸鎬?
+=== 7. Detail BEFORE undo ===
+{
+  "status": "closed",
+  "snapshot": {
+    "id": 15,
+    "ticketId": 10,
+    "auditLogId": 31,
+    "previousStatus": "pending_verify",
+    "previousTechnicianId": 3
+  },
+  "auditCount": 4,
+  "newestAudit": {
+    "id": 31,
+    "ticketId": 10,
+    "operator": "璋冨害鍛?鍥炲綊",
+    "action": "status_change",
+    "beforeData": "{\"id\":10,\"ticketNo\":\"WO-2026-0010\",\"title\":\"銆愬洖褰抳4銆戞按绠″叧闂挙閿€-1781651177831\",\"location\":\"娴嬭瘯C鏍?灞俓",\"description\":\"鍗敓闂存按绠℃紡姘翠弗閲嶉渶缁翠慨\",\"contactName\":\"娴嬭瘯鍛榎",\"contactPhone\":\"13900000001\",\"urgency\":\"high\",\"expectedDate\":\"2026-06-22\",\"status\":\"pending_verify\",\"technicianId\":3,\"technicianName\":\"鐜嬪己\",\"assignedAt\":\"2026-06-16T23:06:17.982Z\",\"createdAt\":\"2026-06-16T23:06:17.934Z\",\"updatedAt\":\"2026-06-16T23:06:17.989Z\"}",
+    "afterData": "{\"id\":10,\"ticketNo\":\"WO-2026-0010\",\"title\":\"銆愬洖褰抳4銆戞按绠″叧闂挙閿€-1781651177831\",\"location\":\"娴嬭瘯C鏍?灞俓",\"description\":\"鍗敓闂存按绠℃紡姘翠弗閲嶉渶缁翠慨\",\"contactName\":\"娴嬭瘯鍛榎",\"contactPhone\":\"13900000001\",\"urgency\":\"high\",\"expectedDate\":\"2026-06-22\",\"status\":\"closed\",\"technicianId\":3,\"technicianName\":\"鐜嬪己\",\"assignedAt\":\"2026-06-16T23:06:17.982Z\",\"createdAt\":\"2026-06-16T23:06:17.934Z\",\"updatedAt\":\"2026-06-16T23:06:17.995Z\"}",
+    "description": "鐘舵€佸彉鏇达細pending_verify 鈫?closed",
+    "createdAt": "2026-06-16T23:06:17.995Z"
+  }
+}
+
+[ASSERT] 鉁?closed 鎬?snapshot 瀛樺湪 - snapshot={"id":15,"ticketId":10,"auditLogId":31,"previousStatus":"pending_verify","previousTechnicianId":3}
+
+[ASSERT] 鉁?snapshot.previousStatus = pending_verify - got={"id":15,"ticketId":10,"auditLogId":31,"previousStatus":"pending_verify","previousTechnicianId":3}
+
+=== 8. 鉁║NDO closed (鏍稿績) ===
+{
+  "status": 200,
+  "err": null,
+  "reverted": "pending_verify",
+  "techName": "鐜嬪己",
+  "techId": 3
+}
+
+[ASSERT] 鉁?UNDO closed: 200 + 鍥?pending_verify + 鎶€甯堜繚鐣?- err=
+
+=== 9. Detail AFTER undo ===
+{
+  "status": "pending_verify",
+  "techId": 3,
+  "snapshot": null,
+  "auditCount": 5,
+  "audits": [
+    {
+      "id": 32,
+      "action": "undo",
+      "undoOfId": 31
+    },
+    {
+      "id": 31,
+      "action": "status_change",
+      "undoOfId": null
+    },
+    {
+      "id": 30,
+      "action": "status_change",
+      "undoOfId": null
+    },
+    {
+      "id": 29,
+      "action": "assign",
+      "undoOfId": null
+    },
+    {
+      "id": 28,
+      "action": "create",
+      "undoOfId": null
+    }
+  ]
+}
+
+[ASSERT] 鉁?鎾ら攢鍚庣姸鎬?pending_verify + 鎶€甯堜繚鐣?
+[ASSERT] 鉁?鎾ら攢鍚?snapshot 娓呴櫎
+
+[ASSERT] 鉁?鎾ら攢鍚庡璁℃暟 = 鍘熸暟 + 1 - before=4 after=5
+
+[ASSERT] 鉁?鏂板 undo 瀹¤涓?undoOfId 姝ｇ‘ - undoRec={"id":32,"action":"undo","undoOfId":31} expectedUndoOfId=31
+
+=== 10. Re-close ===
+{
+  "status": 200,
+  "s": "closed"
+}
+
+[ASSERT] 鉁?鎾ら攢鍚庡彲鍐嶆鎺ㄨ繘鍒?closed
+
+=== 11. Undo again ===
+{
+  "status": 200,
+  "s": "pending_verify"
+}
+
+[ASSERT] 鉁?鍙噸澶嶆挙閿€ (closed鈫抪ending_verify)
+
+=== 12. Double undo MUST FAIL ===
+{
+  "status": 400,
+  "err": "娌℃湁鍙挙閿€鐨勬搷浣?
+}
+
+[ASSERT] 鉁?鎾ら攢鎿嶄綔鏈韩涓嶅彲鍐嶆挙閿€ (400) - err=娌℃湁鍙挙閿€鐨勬搷浣?
+=== 13. CSV export ===
+{
+  "status": 200,
+  "bytes": 1690,
+  "hasTicket": true,
+  "firstLine": "宸ュ崟缂栧彿,鏍囬,鍦扮偣,鏁呴殰鎻忚堪,鑱旂郴浜?鑱旂郴鐢佃瘽,绱ф€ョ▼搴?鏈熸湜瀹屾垚鏃ユ湡,鐘舵€?鎸囨淳鎶€甯?鎶€甯堝伐鍙?鎶€甯堟妧鑳?娲惧崟鏃堕棿,鍒涘缓鏃堕棿,鏇存柊鏃堕棿"
+}
+
+[ASSERT] 鉁?CSV 瀵煎嚭鎴愬姛 (200 闈炵┖)
+
+[ASSERT] 鉁?CSV 鍚綋鍓嶆祴璇曞伐鍗?
+=== 14. 鎸佷箙鍖栵細閲嶅惎/閲嶆煡楠岃瘉 ===
+{
+  "queryStatus": "pending_verify",
+  "expected": "pending_verify",
+  "match": true,
+  "queryAuditCount": 7,
+  "note": "姝ゆ煡璇粠 SQLite 鏂囦欢鐩存帴璇诲彇锛岀瓑鍚孿"鏈嶅姟閲嶅惎鍚庢仮澶峔""
+}
+
+[ASSERT] 鉁?鎸佷箙鍖栵細閲嶆煡鍚庣姸鎬佷笌棰勬湡涓€鑷?
+=== 15. SQLite 鏂囦欢璇佹嵁 ===
+{
+  "dbFile": "./data/app.db",
+  "sizeBytes": 4096,
+  "sizeKB": 4,
+  "mtime": "2026-06-16T17:03:15.777Z"
+}
+
+[ASSERT] 鉁?SQLite DB 鏂囦欢瀛樺湪涓斿ぇ浜? - 4096 bytes
+
+==================================================================
+馃弫 鍚庣鍥炲綊娴嬭瘯 v4 姹囨€? 鈥? 宸ュ崟ID: 10
+==================================================================
+  鉁?鍒涘缓宸ュ崟鎴愬姛  [status=201]
+  鉁?娲惧崟鎴愬姛 in_progress  [err=]
+  鉁?鎺ㄨ繘 pending_verify
+  鉁?鎺ㄨ繘 closed
+  鉁?closed 涓嶈兘鏀规淳 (400)  [err=宸插叧闂伐鍗曚笉鑳芥敼娲綸
+  鉁?closed 涓嶈兘鐩存帴鍙樻洿鐘舵€?(400)  [err=宸插叧闂伐鍗曚笉鑳藉彉鏇寸姸鎬乚
+  鉁?closed 鎬?snapshot 瀛樺湪  [snapshot={"id":15,"ticketId":10,"auditLogId":31,"previousStatus":"pending_verify","previousTechnicianId":3}]
+  鉁?snapshot.previousStatus = pending_verify  [got={"id":15,"ticketId":10,"auditLogId":31,"previousStatus":"pending_verify","previousTechnicianId":3}]
+  鉁?UNDO closed: 200 + 鍥?pending_verify + 鎶€甯堜繚鐣? [err=]
+  鉁?鎾ら攢鍚庣姸鎬?pending_verify + 鎶€甯堜繚鐣?  鉁?鎾ら攢鍚?snapshot 娓呴櫎
+  鉁?鎾ら攢鍚庡璁℃暟 = 鍘熸暟 + 1  [before=4 after=5]
+  鉁?鏂板 undo 瀹¤涓?undoOfId 姝ｇ‘  [undoRec={"id":32,"action":"undo","undoOfId":31} expectedUndoOfId=31]
+  鉁?鎾ら攢鍚庡彲鍐嶆鎺ㄨ繘鍒?closed
+  鉁?鍙噸澶嶆挙閿€ (closed鈫抪ending_verify)
+  鉁?鎾ら攢鎿嶄綔鏈韩涓嶅彲鍐嶆挙閿€ (400)  [err=娌℃湁鍙挙閿€鐨勬搷浣淽
+  鉁?CSV 瀵煎嚭鎴愬姛 (200 闈炵┖)
+  鉁?CSV 鍚綋鍓嶆祴璇曞伐鍗?  鉁?鎸佷箙鍖栵細閲嶆煡鍚庣姸鎬佷笌棰勬湡涓€鑷?  鉁?SQLite DB 鏂囦欢瀛樺湪涓斿ぇ浜?  [4096 bytes]
+
+鎬昏: 20 閫氳繃 / 0 澶辫触 / 20 鎬绘暟
+
+GUI 楠岃瘉姝ラ锛?  1. 鎵撳紑 http://localhost:5178/tickets/10
+  2. 纭宸插叧闂姸鎬佷笅 銆愭挙閿€鍏抽棴銆戞寜閽彲瑙侊紙姗欒壊锛?  3. 纭娲惧崟闈㈡澘鏄剧ず"宸插叧闂蜂笉鑳芥敼娲?锛堢伆锛?  4. 鐐瑰嚮"鎾ら攢鍏抽棴"锛岀‘璁ょ姸鎬佸洖閫€鍒?pending_verify
+  5. 瀹¤鏃ュ織鏂板鎾ら攢璁板綍涓旀湁 undoOfId 鏍囪

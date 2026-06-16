@@ -1,232 +1,151 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { api } from '@/api/client';
-import { useAppStore } from '@/store/useAppStore';
-import type { Urgency } from '@shared/types';
-import { URGENCY_LABELS } from '@shared/types';
-import { ArrowLeft, Save, AlertCircle } from 'lucide-react';
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useAppStore } from "@/store";
+import { URGENCY_LABELS, type Urgency } from "../../shared/types";
+import { ArrowLeft, Loader2, Save } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+const URGENCY_ORDER: Urgency[] = ["low", "medium", "high", "critical"];
 
 export default function NewTicket() {
   const navigate = useNavigate();
-  const { operator } = useAppStore();
+  const { currentOperator, showToast } = useAppStore();
+  const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({
-    title: '',
-    location: '',
-    description: '',
-    contactName: '',
-    contactPhone: '',
-    urgency: 'medium' as Urgency,
-    expectedDate: new Date().toISOString().slice(0, 10),
+    title: "",
+    location: "",
+    description: "",
+    contactName: "",
+    contactPhone: "",
+    urgency: "medium" as Urgency,
+    expectedDate: new Date(Date.now() + 86400000 * 2).toISOString().slice(0, 10),
   });
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [submitting, setSubmitting] = useState(false);
+  const [errs, setErrs] = useState<Record<string, string>>({});
 
-  function update<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
-    setForm((f) => ({ ...f, [key]: value }));
-    if (errors[key as string]) {
-      setErrors((e) => {
-        const n = { ...e };
-        delete n[key as string];
-        return n;
-      });
-    }
-  }
+  const update = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) =>
+    setForm((f) => ({ ...f, [k]: v }));
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    const errs: Record<string, string> = {};
-    if (!form.title.trim()) errs.title = '请填写报修标题';
-    if (!form.location.trim()) errs.location = '请填写地点';
-    if (!form.description.trim()) errs.description = '请填写故障描述';
-    if (!form.contactName.trim()) errs.contactName = '请填写联系人姓名';
-    if (!form.contactPhone.trim()) {
-      errs.contactPhone = '请填写联系电话';
-    } else if (!/^1[3-9]\d{9}$/.test(form.contactPhone)) {
-      errs.contactPhone = '手机号格式不正确';
-    }
-    if (!form.expectedDate) errs.expectedDate = '请选择期望完成日期';
+  const validate = () => {
+    const e: Record<string, string> = {};
+    if (!form.title.trim()) e.title = "请填写报修标题";
+    if (!form.location.trim()) e.location = "请填写地点";
+    if (!form.description.trim()) e.description = "请填写故障描述";
+    if (!form.contactName.trim()) e.contactName = "请填写联系人";
+    if (!/^\d{6,}$/.test(form.contactPhone)) e.contactPhone = "请填写有效联系电话";
+    if (!form.expectedDate) e.expectedDate = "请选择期望日期";
+    setErrs(e);
+    return Object.keys(e).length === 0;
+  };
 
-    if (Object.keys(errs).length > 0) {
-      setErrors(errs);
-      return;
-    }
-
-    setSubmitting(true);
+  const submit = async () => {
+    if (!validate()) return;
+    setBusy(true);
     try {
-      const ticket = await api.tickets.create({ ...form, operator });
-      navigate(`/tickets/${ticket.id}`);
-    } catch (err: any) {
-      alert(err.message || '创建失败');
+      const res = await fetch("/api/tickets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, operator: currentOperator }),
+      });
+      const j = await res.json();
+      if (res.ok) {
+        showToast("工单创建成功", "success");
+        navigate(`/tickets/${j.data.id}`);
+      } else {
+        showToast("创建失败：" + (j.error ?? ""), "error");
+      }
     } finally {
-      setSubmitting(false);
+      setBusy(false);
     }
-  }
+  };
+
+  const input = "w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus:border-blue-400 focus:bg-white focus:outline-none";
+  const label = "mb-1 block text-xs font-medium text-slate-600";
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
-      <button
-        onClick={() => navigate(-1)}
-        className="flex items-center text-sm text-slate-600 hover:text-slate-900 mb-4 transition-colors"
-      >
-        <ArrowLeft className="w-4 h-4 mr-1" />
-        返回
-      </button>
+    <div className="mx-auto max-w-3xl space-y-6">
+      <div className="flex items-center gap-4">
+        <button
+          onClick={() => navigate("/")}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-600 hover:border-blue-300 hover:text-blue-600"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          返回
+        </button>
+        <h2 className="text-xl font-semibold text-slate-800">新建工单</h2>
+      </div>
 
-      <div className="bg-white rounded-lg border border-slate-200 shadow-sm">
-        <div className="px-6 py-4 border-b border-slate-200">
-          <h2 className="text-lg font-semibold text-slate-900">新建报修工单</h2>
-          <p className="text-sm text-slate-500 mt-0.5">请填写报修信息，标 * 为必填项</p>
+      <section className="rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
+        <div className="grid grid-cols-2 gap-5">
+          <div className="col-span-2">
+            <label className={label}>报修标题 <span className="text-red-500">*</span></label>
+            <input className={input} value={form.title} onChange={(e) => update("title", e.target.value)} placeholder="如：3楼空调不制冷" />
+            {errs.title && <p className="mt-1 text-xs text-red-500">{errs.title}</p>}
+          </div>
+          <div>
+            <label className={label}>地点 <span className="text-red-500">*</span></label>
+            <input className={input} value={form.location} onChange={(e) => update("location", e.target.value)} placeholder="如：研发中心3楼301" />
+            {errs.location && <p className="mt-1 text-xs text-red-500">{errs.location}</p>}
+          </div>
+          <div>
+            <label className={label}>期望完成日期 <span className="text-red-500">*</span></label>
+            <input type="date" className={input} value={form.expectedDate} onChange={(e) => update("expectedDate", e.target.value)} />
+            {errs.expectedDate && <p className="mt-1 text-xs text-red-500">{errs.expectedDate}</p>}
+          </div>
+          <div className="col-span-2">
+            <label className={label}>故障描述 <span className="text-red-500">*</span></label>
+            <textarea className={cn(input, "h-24 resize-none")} value={form.description} onChange={(e) => update("description", e.target.value)} placeholder="请详细描述故障现象..." />
+            {errs.description && <p className="mt-1 text-xs text-red-500">{errs.description}</p>}
+          </div>
+          <div>
+            <label className={label}>联系人 <span className="text-red-500">*</span></label>
+            <input className={input} value={form.contactName} onChange={(e) => update("contactName", e.target.value)} placeholder="姓名" />
+            {errs.contactName && <p className="mt-1 text-xs text-red-500">{errs.contactName}</p>}
+          </div>
+          <div>
+            <label className={label}>联系电话 <span className="text-red-500">*</span></label>
+            <input className={input} value={form.contactPhone} onChange={(e) => update("contactPhone", e.target.value)} placeholder="手机号" />
+            {errs.contactPhone && <p className="mt-1 text-xs text-red-500">{errs.contactPhone}</p>}
+          </div>
+          <div className="col-span-2">
+            <label className={label}>紧急程度</label>
+            <div className="flex gap-2">
+              {URGENCY_ORDER.map((u) => (
+                <button
+                  key={u}
+                  type="button"
+                  onClick={() => update("urgency", u)}
+                  className={cn(
+                    "rounded-lg border px-4 py-2 text-sm font-medium transition",
+                    form.urgency === u
+                      ? "border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-200"
+                      : "border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300"
+                  )}
+                >
+                  {URGENCY_LABELS[u]}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">
-              报修标题 <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              value={form.title}
-              onChange={(e) => update('title', e.target.value)}
-              placeholder="例如：3楼空调不制冷"
-              className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all ${
-                errors.title ? 'border-red-400' : 'border-slate-300'
-              }`}
-            />
-            {errors.title && <p className="text-red-500 text-xs mt-1">{errors.title}</p>}
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                地点 <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={form.location}
-                onChange={(e) => update('location', e.target.value)}
-                placeholder="例如：研发中心3楼301"
-                className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all ${
-                  errors.location ? 'border-red-400' : 'border-slate-300'
-                }`}
-              />
-              {errors.location && <p className="text-red-500 text-xs mt-1">{errors.location}</p>}
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                紧急程度 <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={form.urgency}
-                onChange={(e) => update('urgency', e.target.value as Urgency)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all bg-white"
-              >
-                {(Object.keys(URGENCY_LABELS) as Urgency[]).map((u) => (
-                  <option key={u} value={u}>
-                    {URGENCY_LABELS[u]}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">
-              故障描述 <span className="text-red-500">*</span>
-            </label>
-            <textarea
-              value={form.description}
-              onChange={(e) => update('description', e.target.value)}
-              rows={4}
-              placeholder="请详细描述故障现象..."
-              className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all resize-none ${
-                errors.description ? 'border-red-400' : 'border-slate-300'
-              }`}
-            />
-            {errors.description && (
-              <p className="text-red-500 text-xs mt-1">{errors.description}</p>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                联系人姓名 <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={form.contactName}
-                onChange={(e) => update('contactName', e.target.value)}
-                placeholder="例如：陈主管"
-                className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all ${
-                  errors.contactName ? 'border-red-400' : 'border-slate-300'
-                }`}
-              />
-              {errors.contactName && (
-                <p className="text-red-500 text-xs mt-1">{errors.contactName}</p>
-              )}
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                联系电话 <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="tel"
-                value={form.contactPhone}
-                onChange={(e) => update('contactPhone', e.target.value)}
-                placeholder="11位手机号"
-                className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all ${
-                  errors.contactPhone ? 'border-red-400' : 'border-slate-300'
-                }`}
-              />
-              {errors.contactPhone && (
-                <p className="text-red-500 text-xs mt-1">{errors.contactPhone}</p>
-              )}
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">
-              期望完成日期 <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="date"
-              value={form.expectedDate}
-              onChange={(e) => update('expectedDate', e.target.value)}
-              className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all ${
-                errors.expectedDate ? 'border-red-400' : 'border-slate-300'
-              }`}
-            />
-            {errors.expectedDate && (
-              <p className="text-red-500 text-xs mt-1">{errors.expectedDate}</p>
-            )}
-          </div>
-
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
-            <p className="text-xs text-amber-700">
-              提示：提交后工单进入「待派单」状态，需指派技师后方可推进处理。
-            </p>
-          </div>
-
-          <div className="flex justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={() => navigate(-1)}
-              className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
-            >
-              取消
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-            >
-              <Save className="w-4 h-4" />
-              {submitting ? '提交中...' : '提交工单'}
-            </button>
-          </div>
-        </form>
-      </div>
+        <div className="mt-8 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={() => navigate("/")}
+            className="rounded-lg border border-slate-200 bg-white px-5 py-2 text-sm font-medium text-slate-700 hover:border-slate-300"
+          >
+            取消
+          </button>
+          <button
+            onClick={submit}
+            disabled={busy}
+            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            提交工单
+          </button>
+        </div>
+      </section>
     </div>
   );
 }

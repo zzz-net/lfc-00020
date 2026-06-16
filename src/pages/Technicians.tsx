@@ -1,408 +1,247 @@
-import { useEffect, useState } from 'react';
-import { api } from '@/api/client';
-import { useAppStore } from '@/store/useAppStore';
-import type { Skill, Technician, Vacation } from '@shared/types';
-import { SKILL_LABELS } from '@shared/types';
-import SkillTag from '@/components/SkillTag';
-import { Plus, Trash2, Edit2, Calendar as CalendarIcon, Wrench, Save, X } from 'lucide-react';
+import { useEffect, useState } from "react";
+import type { Technician, Skill } from "../../shared/types";
+import { SKILL_LABELS } from "../../shared/types";
+import { useAppStore } from "@/store";
+import { Loader2, Plus, UserCog, Trash2, Calendar, Pencil } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const ALL_SKILLS: Skill[] = [
-  'air_conditioner',
-  'refrigerator',
-  'washing_machine',
-  'computer',
-  'network',
-  'plumbing',
-  'electrical',
-  'elevator',
+  "air_conditioner",
+  "refrigerator",
+  "washing_machine",
+  "computer",
+  "network",
+  "plumbing",
+  "electrical",
+  "elevator",
 ];
 
 export default function Technicians() {
-  const { operator, triggerReload } = useAppStore();
-  const [technicians, setTechnicians] = useState<Technician[]>([]);
+  const [techs, setTechs] = useState<Technician[]>([]);
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<string | null>(null);
+  const { showToast } = useAppStore();
   const [showForm, setShowForm] = useState(false);
-  const [editing, setEditing] = useState<Technician | null>(null);
-  const [vacationFor, setVacationFor] = useState<Technician | null>(null);
-  const [form, setForm] = useState({
-    name: '',
-    employeeId: '',
-    skills: [] as Skill[],
-    dailyLimit: 3,
-  });
-  const [vacationForm, setVacationForm] = useState({
-    startDate: '',
-    endDate: '',
-    reason: '',
-  });
-  const [submitting, setSubmitting] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [form, setForm] = useState({ name: "", employeeId: "", skills: [] as Skill[], dailyLimit: 3 });
+  const [vacForm, setVacForm] = useState({ techId: 0, startDate: "", endDate: "", reason: "" });
+  const [showVacFor, setShowVacFor] = useState<number | null>(null);
 
-  function loadData() {
+  const load = async () => {
     setLoading(true);
-    api.technicians
-      .list()
-      .then(setTechnicians)
-      .catch((err) => alert(err.message))
-      .finally(() => setLoading(false));
-  }
+    try {
+      const r = await fetch("/api/technicians");
+      const j = await r.json();
+      setTechs(j.data ?? []);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  useEffect(() => { load(); }, []);
 
-  function openCreate() {
-    setEditing(null);
-    setForm({ name: '', employeeId: '', skills: [], dailyLimit: 3 });
-    setShowForm(true);
-  }
+  const resetForm = () => {
+    setForm({ name: "", employeeId: "", skills: [], dailyLimit: 3 });
+    setEditingId(null);
+    setShowForm(false);
+  };
 
-  function openEdit(tech: Technician) {
-    setEditing(tech);
-    setForm({
-      name: tech.name,
-      employeeId: tech.employeeId,
-      skills: tech.skills,
-      dailyLimit: tech.dailyLimit,
-    });
-    setShowForm(true);
-  }
+  const toggleSkill = (s: Skill) => {
+    setForm((f) => f.skills.includes(s)
+      ? { ...f, skills: f.skills.filter((x) => x !== s) }
+      : { ...f, skills: [...f.skills, s] }
+    );
+  };
 
-  function toggleSkill(skill: Skill) {
-    setForm((f) => {
-      if (f.skills.includes(skill)) {
-        return { ...f, skills: f.skills.filter((s) => s !== skill) };
-      }
-      return { ...f, skills: [...f.skills, skill] };
-    });
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!form.name.trim() || !form.employeeId.trim() || form.skills.length === 0) {
-      alert('请完整填写信息并至少选择一项技能');
+  const saveTech = async () => {
+    if (!form.name.trim() || !form.employeeId.trim()) {
+      showToast("请填写姓名和工号", "error");
       return;
     }
-    setSubmitting(true);
+    setBusy(editingId ? "edit:" + editingId : "new");
     try {
-      if (editing) {
-        await api.technicians.update(editing.id, {
-          name: form.name,
-          skills: form.skills,
-          dailyLimit: form.dailyLimit,
-          operator,
-        });
-      } else {
-        await api.technicians.create({ ...form, operator });
-      }
-      setShowForm(false);
-      triggerReload();
-      loadData();
-    } catch (err: any) {
-      alert(err.message);
-    } finally {
-      setSubmitting(false);
-    }
-  }
+      const url = editingId ? `/api/technicians/${editingId}` : "/api/technicians";
+      const method = editingId ? "PATCH" : "POST";
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, operator: "系统" }),
+      });
+      const j = await res.json();
+      if (res.ok) {
+        showToast(editingId ? "已更新" : "已新增", "success");
+        resetForm();
+        load();
+      } else showToast("失败：" + (j.error ?? ""), "error");
+    } finally { setBusy(null); }
+  };
 
-  async function handleDelete(tech: Technician) {
-    if (!confirm(`确认删除技师「${tech.name}」？`)) return;
+  const deleteTech = async (id: number) => {
+    if (!confirm("确定删除该技师？相关历史工单不受影响")) return;
+    setBusy("del:" + id);
     try {
-      await api.technicians.remove(tech.id, operator);
-      triggerReload();
-      loadData();
-    } catch (err: any) {
-      alert(err.message);
-    }
-  }
+      const res = await fetch(`/api/technicians/${id}`, { method: "DELETE" });
+      const j = await res.json();
+      if (res.ok) { showToast("已删除", "success"); load(); }
+      else showToast("失败：" + (j.error ?? ""), "error");
+    } finally { setBusy(null); }
+  };
 
-  function openVacation(tech: Technician) {
-    setVacationFor(tech);
-    setVacationForm({ startDate: '', endDate: '', reason: '' });
-  }
+  const editTech = (t: Technician) => {
+    setEditingId(t.id);
+    setForm({ name: t.name, employeeId: t.employeeId, skills: [...t.skills], dailyLimit: t.dailyLimit });
+    setShowForm(true);
+  };
 
-  async function handleVacationSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!vacationFor || !vacationForm.startDate || !vacationForm.endDate) return;
-    setSubmitting(true);
+  const saveVacation = async () => {
+    if (!vacForm.startDate || !vacForm.endDate) { showToast("请选择日期", "error"); return; }
+    setBusy("vac:" + vacForm.techId);
     try {
-      await api.technicians.createVacation(vacationFor.id, { ...vacationForm, operator });
-      setVacationFor(null);
-      triggerReload();
-      loadData();
-    } catch (err: any) {
-      alert(err.message);
-    } finally {
-      setSubmitting(false);
-    }
-  }
+      const res = await fetch(`/api/technicians/${vacForm.techId}/vacations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(vacForm),
+      });
+      const j = await res.json();
+      if (res.ok) { showToast("已设置休假", "success"); setShowVacFor(null); load(); }
+      else showToast("失败：" + (j.error ?? ""), "error");
+    } finally { setBusy(null); }
+  };
+
+  if (loading) return <div className="p-8 text-sm text-slate-500">加载中…</div>;
 
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900">技师管理</h2>
-          <p className="text-sm text-slate-500">维护技师信息、技能和休假安排</p>
-        </div>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="text-sm text-slate-500">共 {techs.length} 名技师</div>
         <button
-          onClick={openCreate}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+          onClick={() => setShowForm(true)}
+          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
         >
-          <Plus className="w-4 h-4" />
-          新增技师
+          <Plus className="h-4 w-4" /> 新增技师
         </button>
       </div>
 
-      {loading ? (
-        <div className="text-center py-20 text-slate-500">加载中...</div>
-      ) : (
-        <div className="grid grid-cols-3 gap-4">
-          {technicians.map((tech) => (
-            <div
-              key={tech.id}
-              className="bg-white rounded-lg border border-slate-200 shadow-sm p-5 hover:shadow-md transition-shadow"
-            >
-              <div className="flex items-start justify-between mb-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-semibold">
-                      {tech.name[0]}
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-slate-900">{tech.name}</h3>
-                      <p className="text-xs text-slate-500">工号：{tech.employeeId}</p>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => openEdit(tech)}
-                    className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                    title="编辑"
-                  >
-                    <Edit2 className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(tech)}
-                    className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                    title="删除"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="mb-3">
-                <div className="text-xs text-slate-500 mb-1.5 flex items-center gap-1">
-                  <Wrench className="w-3 h-3" />
-                  技能
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {tech.skills.map((s) => (
-                    <SkillTag key={s} skill={s} />
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between text-xs text-slate-500">
-                <span>每日接单上限：{tech.dailyLimit} 单</span>
-                <button
-                  onClick={() => openVacation(tech)}
-                  className="text-blue-600 hover:text-blue-700 flex items-center gap-1"
-                >
-                  <CalendarIcon className="w-3 h-3" />
-                  设休假
-                </button>
-              </div>
-            </div>
-          ))}
-
-          {technicians.length === 0 && (
-            <div className="col-span-3 text-center py-20 text-slate-400">
-              <Wrench className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p>暂无技师，点击右上角添加</p>
-            </div>
-          )}
-        </div>
-      )}
-
       {showForm && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
-              <h3 className="font-semibold text-slate-900">
-                {editing ? '编辑技师' : '新增技师'}
-              </h3>
-              <button
-                onClick={() => setShowForm(false)}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <X className="w-5 h-5" />
-              </button>
+        <section className="rounded-xl border border-blue-200 bg-blue-50/40 p-6 shadow-sm">
+          <h3 className="mb-4 text-sm font-semibold text-slate-700">
+            <UserCog className="mr-2 inline h-4 w-4" />
+            {editingId ? "编辑技师" : "新增技师"}
+          </h3>
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="mb-1 block text-xs text-slate-600">姓名 *</label>
+              <input className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </div>
-            <form onSubmit={handleSubmit} className="p-5 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  姓名 <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500"
-                  disabled={submitting}
-                />
+            <div>
+              <label className="mb-1 block text-xs text-slate-600">工号 *</label>
+              <input className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })}
+                disabled={!!editingId} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-slate-600">每日接单上限</label>
+              <input type="number" min={1} max={10} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                value={form.dailyLimit} onChange={(e) => setForm({ ...form, dailyLimit: Math.max(1, Number(e.target.value) || 3) })} />
+            </div>
+            <div className="col-span-3">
+              <label className="mb-1 block text-xs text-slate-600">技能标签</label>
+              <div className="flex flex-wrap gap-2">
+                {ALL_SKILLS.map((s) => (
+                  <button key={s} type="button" onClick={() => toggleSkill(s)}
+                    className={cn(
+                      "rounded-md border px-3 py-1.5 text-xs font-medium transition",
+                      form.skills.includes(s)
+                        ? "border-indigo-400 bg-indigo-50 text-indigo-700 ring-2 ring-indigo-200"
+                        : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                    )}>
+                    {SKILL_LABELS[s]}
+                  </button>
+                ))}
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  工号 <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={form.employeeId}
-                  onChange={(e) => setForm({ ...form, employeeId: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500"
-                  disabled={submitting || !!editing}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  每日接单上限 <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  value={form.dailyLimit}
-                  onChange={(e) =>
-                    setForm({ ...form, dailyLimit: Math.max(1, Number(e.target.value) || 1) })
-                  }
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500"
-                  disabled={submitting}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  技能 <span className="text-red-500">*</span>
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {ALL_SKILLS.map((skill) => {
-                    const selected = form.skills.includes(skill);
-                    return (
-                      <label
-                        key={skill}
-                        className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer text-sm transition-colors ${
-                          selected
-                            ? 'border-blue-500 bg-blue-50 text-blue-700'
-                            : 'border-slate-200 hover:border-slate-300 text-slate-600'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selected}
-                          onChange={() => toggleSkill(skill)}
-                          className="sr-only"
-                        />
-                        <span>{SKILL_LABELS[skill]}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
-                  disabled={submitting}
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-                >
-                  <Save className="w-4 h-4" />
-                  {submitting ? '保存中...' : '保存'}
-                </button>
-              </div>
-            </form>
+            </div>
           </div>
-        </div>
+          <div className="mt-5 flex justify-end gap-2">
+            <button onClick={resetForm} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600">取消</button>
+            <button onClick={saveTech} disabled={busy !== null}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "保存"}
+            </button>
+          </div>
+        </section>
       )}
 
-      {vacationFor && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-sm mx-4">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
-              <h3 className="font-semibold text-slate-900">设置休假 - {vacationFor.name}</h3>
-              <button
-                onClick={() => setVacationFor(null)}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form onSubmit={handleVacationSubmit} className="p-5 space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">开始日期</label>
-                  <input
-                    type="date"
-                    value={vacationForm.startDate}
-                    onChange={(e) =>
-                      setVacationForm({ ...vacationForm, startDate: e.target.value })
-                    }
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500"
-                    disabled={submitting}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">结束日期</label>
-                  <input
-                    type="date"
-                    value={vacationForm.endDate}
-                    onChange={(e) =>
-                      setVacationForm({ ...vacationForm, endDate: e.target.value })
-                    }
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500"
-                    disabled={submitting}
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">休假原因</label>
-                <input
-                  type="text"
-                  value={vacationForm.reason}
-                  onChange={(e) =>
-                    setVacationForm({ ...vacationForm, reason: e.target.value })
-                  }
-                  placeholder="可选"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500"
-                  disabled={submitting}
-                />
-              </div>
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setVacationFor(null)}
-                  className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
-                  disabled={submitting}
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  确定
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-xs text-slate-600">
+            <tr>
+              <th className="px-5 py-3 text-left">姓名</th>
+              <th className="px-5 py-3 text-left">工号</th>
+              <th className="px-5 py-3 text-left">技能</th>
+              <th className="px-5 py-3 text-left">日上限</th>
+              <th className="px-5 py-3 text-left">创建时间</th>
+              <th className="px-5 py-3 text-right">操作</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {techs.map((t) => (
+              <tr key={t.id} className="hover:bg-slate-50/60">
+                <td className="px-5 py-3 font-medium text-slate-800">{t.name}</td>
+                <td className="px-5 py-3 font-mono text-xs text-slate-500">{t.employeeId}</td>
+                <td className="px-5 py-3">
+                  <div className="flex flex-wrap gap-1">
+                    {t.skills.map((s) => (
+                      <span key={s} className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] text-slate-600">
+                        {SKILL_LABELS[s]}
+                      </span>
+                    ))}
+                  </div>
+                </td>
+                <td className="px-5 py-3">{t.dailyLimit} 单</td>
+                <td className="px-5 py-3 text-xs text-slate-500">{new Date(t.createdAt).toLocaleDateString("zh-CN")}</td>
+                <td className="px-5 py-3">
+                  <div className="flex justify-end gap-1">
+                    <button onClick={() => editTech(t)}
+                      className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 hover:border-blue-300 hover:text-blue-600">
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button onClick={() => setShowVacFor(showVacFor === t.id ? null : t.id)}
+                      className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 hover:border-violet-300 hover:text-violet-600">
+                      <Calendar className="h-3.5 w-3.5" />
+                    </button>
+                    <button onClick={() => deleteTech(t.id)}
+                      disabled={busy === "del:" + t.id}
+                      className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 hover:border-red-300 hover:text-red-600 disabled:opacity-50">
+                      {busy === "del:" + t.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    </button>
+                  </div>
+                  {showVacFor === t.id && (
+                    <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50/40 p-3 text-left">
+                      <div className="mb-2 text-xs font-medium text-violet-700">设置休假（{t.name}）</div>
+                      <div className="mb-2 grid grid-cols-3 gap-2">
+                        <input type="date" placeholder="开始"
+                          value={vacForm.startDate} onChange={(e) => setVacForm({ ...vacForm, techId: t.id, startDate: e.target.value })}
+                          className="rounded border border-slate-200 bg-white px-2 py-1.5 text-xs" />
+                        <input type="date" placeholder="结束"
+                          value={vacForm.endDate} onChange={(e) => setVacForm({ ...vacForm, techId: t.id, endDate: e.target.value })}
+                          className="rounded border border-slate-200 bg-white px-2 py-1.5 text-xs" />
+                        <input placeholder="原因（可选）"
+                          value={vacForm.reason} onChange={(e) => setVacForm({ ...vacForm, reason: e.target.value })}
+                          className="rounded border border-slate-200 bg-white px-2 py-1.5 text-xs" />
+                      </div>
+                      <button onClick={saveVacation}
+                        className="rounded bg-violet-600 px-3 py-1 text-xs font-medium text-white hover:bg-violet-700">
+                        保存休假
+                      </button>
+                    </div>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
     </div>
   );
 }
