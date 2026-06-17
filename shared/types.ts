@@ -413,3 +413,108 @@ export const VERIFICATION_STEP_LABELS: Record<VerificationStepStatus, string> = 
   success: '通过',
   failed: '失败',
 };
+
+export type TakeoverPlanScope = 'public' | 'private';
+
+export type TakeoverAction = 'launch' | 'reuse' | 'stop';
+
+export type TakeoverReceiptStatus = 'pending' | 'running' | 'success' | 'failed';
+
+export type CheckStatus = 'pending' | 'running' | 'success' | 'failed' | 'skipped';
+
+export const CHECK_STATUS_LABELS: Record<CheckStatus, string> = {
+  pending: '待检测',
+  running: '检测中',
+  success: '通过',
+  failed: '失败',
+  skipped: '跳过',
+};
+
+export const TAKEOVER_ACTION_LABELS: Record<TakeoverAction, string> = {
+  launch: '启动',
+  reuse: '复用',
+  stop: '停止',
+};
+
+export const TAKEOVER_RECEIPT_STATUS_LABELS: Record<TakeoverReceiptStatus, string> = {
+  pending: '待处理',
+  running: '执行中',
+  success: '成功',
+  failed: '失败',
+};
+
+export const TAKEOVER_RECEIPT_STATUS_COLORS: Record<TakeoverReceiptStatus, string> = {
+  pending: 'slate',
+  running: 'amber',
+  success: 'emerald',
+  failed: 'red',
+};
+
+export const TAKEOVER_PLAN_SCOPE_LABELS: Record<TakeoverPlanScope, string> = {
+  public: '公共方案',
+  private: '私有方案',
+};
+
+export interface PortOccupierInfo {
+  port: number;
+  isOccupied: boolean;
+  pid?: number;
+  processName?: string;
+  processPath?: string;
+  commandLine?: string;
+  belongsToWorkspace?: boolean;
+  suggestion?: string;
+}
+
+export interface CheckDetail {
+  status: CheckStatus;
+  message?: string;
+  httpStatus?: number;
+  responseTimeMs?: number;
+}
+
+export interface TakeoverPlan {
+  id: number;
+  name: string;
+  description?: string;
+  scope: TakeoverPlanScope;
+  ownerUsername: string;
+  frontendCommand?: string;
+  backendCommand?: string;
+  expectedPort: number;
+  homePageUrl: string;
+  apiHealthUrl: string;
+  timeoutSec: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TakeoverReceipt {
+  id: number;
+  planId: number;
+  planName: string;
+  action: TakeoverAction;
+  operatorUsername: string;
+  status: TakeoverReceiptStatus;
+  portOccupier?: PortOccupierInfo;
+  homePageCheck: CheckDetail;
+  apiHealthCheck: CheckDetail;
+  processOwnershipCheck: CheckDetail;
+  conflictDescription?: string;
+  handlingSuggestion?: string;
+  actualPid?: number;
+  actualPort?: number;
+  timeline: TimelineEvent[];
+  durationMs?: number;
+  undoOfId?: number;
+  isUndone?: boolean;
+  createdAt: string;
+  completedAt?: string;
+}
+
+export interface TakeoverPlanExport {
+  version: number;
+  exportedAt: string;
+  plans: TakeoverPlan[];
+}

@@ -12,6 +12,7 @@ import technicianRoutes from './routes/technicians.js'
 import exportRoutes from './routes/export.js'
 import auditRoutes from './routes/audit.js'
 import devworkbenchRoutes from './routes/devworkbench.js'
+import takeoverRoutes from './routes/takeover.js'
 import { initDatabase } from './db.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -32,6 +33,7 @@ app.use('/api/technicians', technicianRoutes)
 app.use('/api/export', exportRoutes)
 app.use('/api/audit', auditRoutes)
 app.use('/api/devworkbench', devworkbenchRoutes)
+app.use('/api/takeover', takeoverRoutes)
 
 app.use(
   '/api/health',

@@ -210,6 +210,55 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_verification_operator ON verification_records(operator_username);
     CREATE INDEX IF NOT EXISTS idx_verification_status ON verification_records(status);
     CREATE INDEX IF NOT EXISTS idx_verification_created ON verification_records(created_at);
+
+    CREATE TABLE IF NOT EXISTS takeover_plans (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      description TEXT,
+      scope TEXT NOT NULL DEFAULT 'private',
+      owner_username TEXT NOT NULL,
+      frontend_command TEXT,
+      backend_command TEXT,
+      expected_port INTEGER NOT NULL,
+      home_page_url TEXT NOT NULL,
+      api_health_url TEXT NOT NULL,
+      timeout_sec INTEGER NOT NULL DEFAULT 30,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS takeover_receipts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      plan_id INTEGER NOT NULL,
+      plan_name TEXT NOT NULL,
+      action TEXT NOT NULL,
+      operator_username TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      port_occupier TEXT,
+      home_page_check TEXT NOT NULL,
+      api_health_check TEXT NOT NULL,
+      process_ownership_check TEXT NOT NULL,
+      conflict_description TEXT,
+      handling_suggestion TEXT,
+      actual_pid INTEGER,
+      actual_port INTEGER,
+      timeline TEXT NOT NULL,
+      duration_ms INTEGER,
+      undo_of_id INTEGER REFERENCES takeover_receipts(id),
+      is_undone INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      completed_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_takeover_plan_owner ON takeover_plans(owner_username);
+    CREATE INDEX IF NOT EXISTS idx_takeover_plan_scope ON takeover_plans(scope);
+    CREATE INDEX IF NOT EXISTS idx_takeover_plan_port ON takeover_plans(expected_port);
+    CREATE INDEX IF NOT EXISTS idx_takeover_receipt_plan ON takeover_receipts(plan_id);
+    CREATE INDEX IF NOT EXISTS idx_takeover_receipt_operator ON takeover_receipts(operator_username);
+    CREATE INDEX IF NOT EXISTS idx_takeover_receipt_status ON takeover_receipts(status);
+    CREATE INDEX IF NOT EXISTS idx_takeover_receipt_created ON takeover_receipts(created_at);
+    CREATE INDEX IF NOT EXISTS idx_takeover_receipt_action ON takeover_receipts(action);
   `);
 
   _migrateExportBatches();
@@ -295,6 +344,55 @@ export function initDatabase() {
       projectRoot,
       3002,
       'http://localhost:3002/api/health',
+      30
+    );
+  }
+
+  const takeoverPlanCount = db.prepare('SELECT COUNT(*) as c FROM takeover_plans').get() as { c: number };
+  if (takeoverPlanCount.c === 0) {
+    const projectRoot = path.join(__dirname, '..');
+    const insertPlan = db.prepare(`
+      INSERT INTO takeover_plans (
+        name, description, scope, owner_username,
+        frontend_command, backend_command, expected_port,
+        home_page_url, api_health_url, timeout_sec, is_active,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))
+    `);
+    insertPlan.run(
+      '全栈开发环境',
+      '同时启动前后端开发服务的完整接管方案',
+      'public',
+      'admin',
+      'npm run client:dev',
+      'npm run server:dev',
+      3088,
+      'http://localhost:5178/',
+      'http://localhost:3088/api/health',
+      60
+    );
+    insertPlan.run(
+      '后端独立环境',
+      '仅启动后端 API 服务的接管方案',
+      'public',
+      'admin',
+      null,
+      'npm run server:dev',
+      3088,
+      'http://localhost:3088/api/health',
+      'http://localhost:3088/api/health',
+      30
+    );
+    insertPlan.run(
+      '个人测试环境',
+      'devuser 个人私有测试环境',
+      'private',
+      'devuser',
+      null,
+      'npm run server:dev',
+      3090,
+      'http://localhost:3090/api/health',
+      'http://localhost:3090/api/health',
       30
     );
   }

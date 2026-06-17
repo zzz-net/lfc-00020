@@ -8,6 +8,7 @@ import ExportCenter from "@/pages/Export";
 import ExportBatchDetail from "@/pages/ExportBatchDetail";
 import AuditLog from "@/pages/AuditLog";
 import DevWorkbench from "@/pages/DevWorkbench";
+import TakeoverReceiptCenter from "@/pages/TakeoverReceiptCenter";
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
           <Route path="/export/batches/:id" element={<ExportBatchDetail />} />
           <Route path="/audit" element={<AuditLog />} />
           <Route path="/devworkbench" element={<DevWorkbench />} />
+          <Route path="/takeover" element={<TakeoverReceiptCenter />} />
         </Route>
       </Routes>
     </Router>
