@@ -536,3 +536,213 @@ rework_applications (
   updated_at      TEXT
 )
 ```
+
+## ✅ 新增：环境接管回执中心
+
+把每次本地服务的启动、复用、停止都做成**独立可追踪的回执**，不再只看一次探活结果。用户先保存接管方案，执行时先识别端口当前占用者，再同时校验**首页、API、实际进程归属**，三项全过才允许标成可复用或启动成功；任何一步存疑都落成失败回执、冲突说明和处理建议。所有数据 SQLite 持久化，跨重启保留。
+
+### 🔐 权限控制
+
+| 角色 | 公共方案 | 私有方案 | 撤销/停止 |
+|------|---------|---------|----------|
+| **管理员 (admin)** | 可创建/修改/删除 | 可管理所有 | 可执行所有操作 |
+| **普通用户 (devuser)** | 只读 | 仅可管理自己的 | 仅可操作自己方案的进程 |
+
+通过请求头 `x-username` 切换身份（前端 GUI 提供用户下拉选择器）。
+
+### 📋 接管方案字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `name` | string | 方案名称（唯一可读） |
+| `description` | string? | 方案说明 |
+| `scope` | `public` \| `private` | 可见范围 |
+| `ownerUsername` | string | 所有者 |
+| `frontendCommand` | string? | 前端启动命令 |
+| `backendCommand` | string? | 后端启动命令 |
+| `expectedPort` | number | 预期端口（1-65535） |
+| `homePageUrl` | string | 首页地址（完整 URL） |
+| `apiHealthUrl` | string | API 健康检查地址（完整 URL） |
+| `timeoutSec` | number | 启动/检测超时（5-600 秒） |
+| `isActive` | boolean | 软删除标记 |
+
+### 🔁 三种操作模式
+
+| 操作 | 说明 | 端口期望 |
+|------|------|---------|
+| `launch` | 启动新服务进程 | **必须空闲**，被占用则失败 |
+| `reuse` | 复用已存在的进程 | **必须被本项目进程占用** |
+| `stop` | 停止运行中的进程 | 仅允许停止归属本项目的进程 |
+
+### 🛡️ 三重校验机制（必须三项全过才算成功）
+
+```
+端口占用识别
+   └─→ 进程归属校验（PID、进程名、命令行、可执行路径 与 项目根目录比对）
+首页 HTTP 可达性检测（200 OK）
+API 健康端点检测（200 OK）
+```
+
+任何一步失败 → 立即落成 `failed` 回执，并附带：
+- `conflictDescription`：冲突原因的人类可读描述
+- `handlingSuggestion`：下一步处理建议
+
+### 📝 回执记录（TakeoverReceipt）
+
+每次操作生成**独立回执**，包含完整审计痕迹：
+
+| 字段 | 说明 |
+|------|------|
+| `planId` / `planName` | 关联方案 |
+| `action` | launch / reuse / stop |
+| `operatorUsername` | 实际操作者 |
+| `status` | pending / success / failed |
+| `portOccupier` | 端口占用者信息（PID、进程名、路径、是否归属本项目） |
+| `homePageCheck` | 首页检测详情（状态、HTTP 码、响应时间、消息） |
+| `apiHealthCheck` | API 检测详情（同上） |
+| `processOwnershipCheck` | 进程归属检测详情（同上） |
+| `conflictDescription` | 冲突说明（如有） |
+| `handlingSuggestion` | 处理建议（如有） |
+| `actualPid` / `actualPort` | 实际启动的 PID 和端口 |
+| `timeline` | 完整执行时间线（JSON 数组） |
+| `durationMs` | 总耗时（毫秒） |
+| `undoOfId` | 若为撤销回执，指向被撤销的回执 ID |
+| `isUndone` | 该回执是否已被撤销 |
+
+### ↩️ 最近一次接管撤销
+
+- 仅可撤销最近一条 `success` 状态且未被撤销过的回执
+- 撤销操作会：
+  1. 安全终止对应 PID 的进程（先确认归属本项目）
+  2. 将原回执 `isUndone` 标记为 `1`
+  3. 生成一条新回执记录撤销操作（`undoOfId` 指向原回执）
+- 撤销操作本身不可再次撤销（幂等保护）
+
+### ▶️ 成功方案回放
+
+- 一键查询最近一次执行成功的接管方案：`GET /api/takeover/plans/last-success`
+- 前端可直接套用该方案的配置作为新方案模板（名称追加"(副本)"，端口可改）
+
+### 📦 配置导入导出
+
+**导出格式**（带版本号的 JSON）：
+```json
+{
+  "version": 1,
+  "exportedAt": "2025-01-01T00:00:00.000Z",
+  "plans": [ { ...TakeoverPlan }, ... ]
+}
+```
+
+**导入规则**：
+- 所有导入的方案自动设为 `private`，归属导入者（防止越权）
+- 原方案 ID 被忽略，自动重新分配新 ID
+- 返回导入成功的条数
+
+### 📡 REST API 接口
+
+所有接口通过 `x-username` 请求头识别用户。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/takeover/plans` | 方案列表（自动权限过滤：公共 + 自己私有） |
+| POST | `/api/takeover/plans` | 新建方案 |
+| PUT | `/api/takeover/plans/:id` | 更新方案（权限校验） |
+| DELETE | `/api/takeover/plans/:id` | 删除方案（软删除，权限校验） |
+| GET | `/api/takeover/plans/last-success` | 最近成功方案（回放用） |
+| GET | `/api/takeover/plans/export` | 导出所有可见方案为 JSON |
+| POST | `/api/takeover/plans/import` | 导入方案（自动转私有+归属导入者） |
+| GET | `/api/takeover/ports/:port/check` | 端口占用检测（含 PID、进程名、归属） |
+| POST | `/api/takeover/plans/:id/execute` | 执行接管：`{ action: "launch" \| "reuse" \| "stop" }` |
+| GET | `/api/takeover/receipts` | 回执列表（最新在前） |
+| GET | `/api/takeover/receipts/last` | 最近一条回执 |
+| GET | `/api/takeover/receipts/:id` | 回执详情 |
+| POST | `/api/takeover/receipts/undo-last` | 撤销最近一次成功接管 |
+
+### 📊 SQLite 数据表
+
+```sql
+takeover_plans (
+  id                  INTEGER PK
+  name                TEXT NOT NULL
+  description         TEXT
+  scope               TEXT NOT NULL DEFAULT 'private'   -- public/private
+  owner_username      TEXT NOT NULL
+  frontend_command    TEXT
+  backend_command     TEXT
+  expected_port       INTEGER NOT NULL
+  home_page_url       TEXT NOT NULL
+  api_health_url      TEXT NOT NULL
+  timeout_sec         INTEGER NOT NULL DEFAULT 30
+  is_active           INTEGER NOT NULL DEFAULT 1        -- 软删除
+  created_at          TEXT NOT NULL
+  updated_at          TEXT NOT NULL
+)
+
+takeover_receipts (
+  id                      INTEGER PK
+  plan_id                 INTEGER NOT NULL
+  plan_name               TEXT NOT NULL
+  action                  TEXT NOT NULL                 -- launch/reuse/stop
+  operator_username       TEXT NOT NULL
+  status                  TEXT NOT NULL DEFAULT 'pending' -- pending/success/failed
+  port_occupier           TEXT                            -- JSON PortOccupierInfo
+  home_page_check         TEXT NOT NULL                   -- JSON CheckDetail
+  api_health_check        TEXT NOT NULL                   -- JSON CheckDetail
+  process_ownership_check TEXT NOT NULL                   -- JSON CheckDetail
+  conflict_description    TEXT
+  handling_suggestion     TEXT
+  actual_pid              INTEGER
+  actual_port             INTEGER
+  timeline                TEXT NOT NULL                   -- JSON TimelineEvent[]
+  duration_ms             INTEGER
+  undo_of_id              INTEGER REFERENCES takeover_receipts(id)
+  is_undone               INTEGER NOT NULL DEFAULT 0
+  created_at              TEXT NOT NULL
+  completed_at            TEXT
+)
+```
+
+所有复合类型字段（CheckDetail、PortOccupierInfo、TimelineEvent[]）均使用 JSON 序列化存入 TEXT 字段，保持字段灵活性。
+
+### 🛡️ 进程安全硬合规
+
+严格遵守以下原则，绝不误杀外部进程：
+1. **绝不按进程名批量杀进程**（如 `taskkill /IM python.exe` 一律禁止）
+2. 仅通过**明确的 PID** 终止进程
+3. 终止前必须核对：PID 存在 + 命令行/路径归属当前项目工作空间
+4. 不属于本项目的进程 → 拒绝停止操作，给出明确提示
+
+### 🖥 GUI 功能（接管回执中心页面）
+
+- **顶部操作栏**：用户身份切换、撤销最近接管、回放成功方案、导出方案、导入方案、刷新、新建方案
+- **运行中服务卡片**：实时展示当前端口占用、PID、进程名、归属判断
+- **方案管理表格**：
+  - 列：名称、范围、所有者、端口、首页、API、操作按钮
+  - 每行三按钮：🚀 launch / 🔁 reuse / ⏹ stop
+  - 编辑、删除（无权限时显示「只读」标记并禁用）
+  - 新建/编辑弹窗：端口输入实时检测、公共方案权限警告
+- **回执列表**：
+  - 可展开的详情面板
+  - 三重检测结果（首页/API/进程归属）独立显示状态码、耗时、消息
+  - 端口占用信息（PID、进程名、路径、是否归属本项目）
+  - 冲突说明与处理建议（失败时）
+  - 完整执行时间线
+
+### 🧪 自动化测试
+
+```bash
+node test-takeover-receipt-center.mjs
+```
+
+**覆盖至少 6 大指定场景**：
+
+| 场景 | 测试内容 |
+|------|---------|
+| 🚫 **端口被占用** | launch 模式下端口被占用 → 失败回执，含冲突说明+处理建议，不启动进程 |
+| 404 **首页 404** | 首页地址指向不存在路径 → 回执 failed，首页检测 failed，建议检查地址 |
+| ⚠️ **只有 API 通** | API 检测 passed 但首页 failed → 整体 failed，三重校验独立记录 |
+| 🔒 **越权操作** | devuser 创建公共方案 → 403；修改公共方案 → 403；admin 可全操作 |
+| 💾 **重启后仍能查回执** | 后端服务 kill 重启后，之前的方案、回执、三重检测详情全部保留 |
+| 📥 **导入方案后二次执行** | admin 导出 → devuser 导入（自动转私有+归属）→ devuser 执行生成有效回执 |
+```

@@ -532,11 +532,16 @@ function _buildConflictAndSuggestion(
       if (action === 'launch') {
         suggestions.push(`可尝试使用"复用"操作接管现有进程，或先停止该进程再重新启动`);
       }
-    } else {
+    } else if (portOccupier.belongsToWorkspace === false) {
       conflicts.push(
         `端口 ${portOccupier.port} 被外部进程 PID:${portOccupier.pid} (${portOccupier.processName || '未知进程'}) 占用`
       );
       suggestions.push(`请更换端口，或手动终止 PID:${portOccupier.pid} 后重试`);
+    } else {
+      conflicts.push(
+        `端口 ${portOccupier.port} 被进程 PID:${portOccupier.pid} (${portOccupier.processName || '未知进程'}) 占用，归属未确认`
+      );
+      suggestions.push(`端口被占用但进程归属无法判定，请手动检查 PID:${portOccupier.pid} 是否属于当前项目后再操作`);
     }
   }
 
@@ -547,16 +552,28 @@ function _buildConflictAndSuggestion(
     } else if (homePageCheck.message) {
       suggestions.push(`首页无法连接，请确认服务已启动且地址端口匹配`);
     }
+  } else if (homePageCheck.status === 'pending') {
+    conflicts.push('首页检测未完成');
+    suggestions.push('首页检测未执行完毕，请检查服务是否正常启动后重试');
   }
 
   if (apiHealthCheck.status === 'failed') {
     conflicts.push(`API 健康检查失败: ${apiHealthCheck.message || `HTTP ${apiHealthCheck.httpStatus}`}`);
     suggestions.push(`API 健康检查未通过，请检查 API 地址配置和后端服务运行状态`);
+  } else if (apiHealthCheck.status === 'pending') {
+    conflicts.push('API 健康检测未完成');
+    suggestions.push('API 健康检测未执行完毕，请检查后端服务是否正常运行后重试');
   }
 
   if (processOwnershipCheck.status === 'failed') {
     conflicts.push(`进程归属校验失败: ${processOwnershipCheck.message || '进程不属于当前项目工作空间'}`);
     suggestions.push(`检测到占用端口的进程不属于当前项目，为避免误杀，请手动确认后处理`);
+  } else if (processOwnershipCheck.status === 'pending') {
+    conflicts.push(`进程归属校验未完成: ${processOwnershipCheck.message || '归属状态待确认'}`);
+    suggestions.push(`进程归属校验未完成，无法确认接管结果，请检查端口上的进程是否属于当前项目后重试`);
+  } else if (processOwnershipCheck.status === 'skipped' && action !== 'stop') {
+    conflicts.push(`进程归属校验被跳过: ${processOwnershipCheck.message || '未执行归属校验'}`);
+    suggestions.push(`进程归属校验被跳过，无法确认接管结果，请手动检查后重试`);
   }
 
   return {
@@ -800,18 +817,23 @@ export async function executeTakeover(
 
   if (action === 'launch') {
     if (portOccupier.isOccupied) {
+      const ownershipCheck: CheckDetail = portOccupier.belongsToWorkspace
+        ? { status: 'failed', message: `端口被本项目进程 (PID:${portOccupier.pid}) 占用，无法启动新进程` }
+        : portOccupier.belongsToWorkspace === false
+          ? { status: 'failed', message: `端口被外部进程 (PID:${portOccupier.pid}, ${portOccupier.processName || '未知'}) 占用，无法启动新进程` }
+          : { status: 'failed', message: `端口被进程 (PID:${portOccupier.pid}) 占用，归属未确认，无法启动新进程` };
       const { conflictDescription, handlingSuggestion } = _buildConflictAndSuggestion(
         action,
         portOccupier,
         { status: 'skipped' },
         { status: 'skipped' },
-        { status: 'skipped' }
+        ownershipCheck
       );
       _updateReceipt(receipt.id, {
         status: 'failed',
         homePageCheck: { status: 'skipped' },
         apiHealthCheck: { status: 'skipped' },
-        processOwnershipCheck: { status: 'skipped' },
+        processOwnershipCheck: ownershipCheck,
         conflictDescription,
         handlingSuggestion,
         durationMs: Date.now() - startTime,
@@ -820,9 +842,6 @@ export async function executeTakeover(
       _addTimelineEvent(receipt.id, '启动失败', `端口 ${plan.expectedPort} 已被占用，无法启动新进程`);
       return getReceiptById(receipt.id)!;
     }
-
-    _addTimelineEvent(receipt.id, '步骤 2/4: 进程归属校验', '启动新进程，跳过归属校验');
-    processOwnershipCheck = { status: 'skipped', message: '启动新进程，无需归属校验' };
 
     const command = plan.backendCommand || plan.frontendCommand;
     if (!command) {
@@ -876,8 +895,13 @@ export async function executeTakeover(
       return getReceiptById(receipt.id)!;
     }
 
-    await new Promise((r) => setTimeout(r, 1500));
-    const portAfterStart = await getPortOccupier(plan.expectedPort);
+    const portWaitMs = Math.min((plan.timeoutSec || 15) * 1000, 15000);
+    const portWaitStart = Date.now();
+    let portAfterStart = await getPortOccupier(plan.expectedPort);
+    while (!portAfterStart.isOccupied && Date.now() - portWaitStart < portWaitMs) {
+      await new Promise((r) => setTimeout(r, 800));
+      portAfterStart = await getPortOccupier(plan.expectedPort);
+    }
     if (!portAfterStart.isOccupied) {
       const { conflictDescription, handlingSuggestion } = _buildConflictAndSuggestion(
         action,
@@ -902,6 +926,42 @@ export async function executeTakeover(
         completedAt: now(),
       });
       _addTimelineEvent(receipt.id, '启动失败', '进程启动后端口未被监听');
+      return getReceiptById(receipt.id)!;
+    }
+
+    _addTimelineEvent(receipt.id, '步骤 2/4: 校验进程归属', `端口 ${plan.expectedPort} 已被占用，校验归属`);
+    if (portAfterStart.belongsToWorkspace) {
+      processOwnershipCheck = { status: 'success', message: `进程归属校验通过：端口 ${plan.expectedPort} 上的进程 (PID:${portAfterStart.pid}) 属于当前项目` };
+      _addTimelineEvent(receipt.id, '进程归属校验通过', `PID:${portAfterStart.pid} 属于当前项目`);
+      if (portAfterStart.pid) actualPid = portAfterStart.pid;
+    } else {
+      processOwnershipCheck = {
+        status: 'failed',
+        message: portAfterStart.pid
+          ? `端口 ${plan.expectedPort} 被非本项目进程 (PID:${portAfterStart.pid}) 占用，启动的服务可能未正确绑定`
+          : `无法确认端口 ${plan.expectedPort} 上进程的归属，进程归属校验未通过`,
+      };
+      _addTimelineEvent(receipt.id, '进程归属校验未通过', `PID:${portAfterStart.pid || '未知'}, 不属于当前项目`);
+      const { conflictDescription, handlingSuggestion } = _buildConflictAndSuggestion(
+        action,
+        portAfterStart,
+        { status: 'skipped' },
+        { status: 'skipped' },
+        processOwnershipCheck
+      );
+      _updateReceipt(receipt.id, {
+        status: 'failed',
+        homePageCheck: { status: 'skipped' },
+        apiHealthCheck: { status: 'skipped' },
+        processOwnershipCheck,
+        conflictDescription,
+        handlingSuggestion,
+        actualPid,
+        actualPort,
+        durationMs: Date.now() - startTime,
+        completedAt: now(),
+      });
+      _addTimelineEvent(receipt.id, '启动失败', '进程归属校验未通过，中止接管');
       return getReceiptById(receipt.id)!;
     }
   }
@@ -953,7 +1013,7 @@ export async function executeTakeover(
   const allPassed =
     homePageCheck.status === 'success' &&
     apiHealthCheck.status === 'success' &&
-    (processOwnershipCheck.status === 'success' || processOwnershipCheck.status === 'skipped');
+    processOwnershipCheck.status === 'success';
 
   if (!allPassed) {
     const { conflictDescription, handlingSuggestion } = _buildConflictAndSuggestion(
@@ -965,6 +1025,7 @@ export async function executeTakeover(
     );
     _updateReceipt(receipt.id, {
       status: 'failed',
+      processOwnershipCheck,
       conflictDescription,
       handlingSuggestion,
       actualPid,
@@ -982,6 +1043,7 @@ export async function executeTakeover(
 
   _updateReceipt(receipt.id, {
     status: 'success',
+    processOwnershipCheck,
     actualPid,
     actualPort,
     durationMs: Date.now() - startTime,

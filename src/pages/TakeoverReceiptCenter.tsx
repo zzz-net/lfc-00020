@@ -762,12 +762,12 @@ export default function TakeoverReceiptCenter() {
                             {r.status === "success" ? (
                               <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700">
                                 <CheckCircle2 className="h-3.5 w-3.5" />
-                                全部通过
+                                三项校验全部通过
                               </span>
                             ) : r.status === "failed" ? (
                               <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700">
                                 <XCircle className="h-3.5 w-3.5" />
-                                检测失败
+                                未通过
                               </span>
                             ) : (
                               <span className="text-xs text-slate-500">-</span>
@@ -801,8 +801,8 @@ export default function TakeoverReceiptCenter() {
                                   </div>
                                   <div className="md:col-span-2">
                                     <span className="text-slate-500">归属: </span>
-                                    <span className={r.portOccupier.belongsToWorkspace ? "text-emerald-600" : "text-amber-600"}>
-                                      {r.portOccupier.belongsToWorkspace ? "本项目进程" : "外部进程"}
+                                    <span className={r.portOccupier.belongsToWorkspace ? "text-emerald-600" : r.portOccupier.belongsToWorkspace === false ? "text-amber-600" : "text-slate-400"}>
+                                      {r.portOccupier.belongsToWorkspace ? "本项目进程" : r.portOccupier.belongsToWorkspace === false ? "外部进程" : "归属未确认"}
                                     </span>
                                   </div>
                                 </>
