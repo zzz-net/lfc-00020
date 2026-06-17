@@ -299,8 +299,8 @@ node test-task-receipt-center.mjs
 
 ```bash
 npm install
-npm run dev          # 同时启动前端(Vite 5178) + 后端(Express 3002)
-# 前端代理 /api -> http://localhost:3002
+npm run dev          # 同时启动前端(Vite 5178) + 后端(Express 3088)
+# 前端代理 /api -> http://localhost:3088
 ```
 
 访问 http://localhost:5178 打开工作台。
@@ -365,6 +365,150 @@ GUI 验证点：
 - 已关闭工单显示「申请复核」按钮，待审批时显示「撤回」和「审批」按钮
 - 「复核/返工记录」卡片展示历史申请及时间线
 - 审计日志时间线显示返工相关操作且颜色区分
+
+## ✅ 新增：启动配置与验真工作台
+
+把本地开发环境从手动猜端口改成可复用模块。配置、验真记录全部落库 SQLite，服务重启后仍可查询。
+
+### 🔐 权限控制
+
+- **管理员 (admin)**：可维护公共配置，可查看所有配置，可停止运行中的进程
+- **普通用户 (devuser)**：只能管理自己的私有配置；公共配置只读；无权停止进程
+- 通过请求头 `x-username` 切换身份（前端 GUI 提供下拉选择器）
+
+### 📋 启动配置字段
+
+| 字段 | 说明 |
+|------|------|
+| `name` | 配置名称 |
+| `scope` | `public` 公共 / `private` 私有 |
+| `serviceType` | `frontend` 前端 / `backend` 后端 |
+| `command` | 启动命令（如 `npm run server:dev`） |
+| `cwd` | 工作目录 |
+| `fixedPort` | **固定端口**，启动前强制占用检测 |
+| `healthCheckUrl` | 健康检查地址 |
+| `startupTimeoutSec` | 启动超时秒数（5-600） |
+
+### 🛡️ 端口冲突拦截
+
+- 创建/编辑配置时，前端实时调用 `/api/devworkbench/ports/:port/check` 检测
+- 启动流程第一步先检测端口，若被占用直接返回失败，写入验真记录，**不会触发命令启动**
+- 冲突时给出处理建议："请更换端口或停止占用该端口的进程"
+
+### ✅ 双重探活验真
+
+启动后自动执行两轮健康检查，**只有全部通过才算成功**：
+
+| 服务类型 | 页面探活 | 接口探活 |
+|----------|---------|---------|
+| frontend | ✅ HTTP GET `healthCheckUrl`，期望 200 | ⏭️ 跳过（自动 PASS） |
+| backend  | ⏭️ 跳过（自动 PASS） | ✅ HTTP GET `healthCheckUrl`，期望 200 |
+
+- 探活使用轮询（每秒一次）直到成功或超时
+- 结果写入 `pageCheckStatus` / `apiCheckStatus` 字段
+
+### 📝 验真记录（持久化）
+
+每次启动都会生成一条 `verification_records` 记录：
+
+- 实际端口、PID、耗时（毫秒）
+- 页面/接口探活状态
+- 失败原因（如端口占用、超时等）
+- **完整时间线**（JSON 数组）：端口检查 → 进程启动 → 页面探活 → 接口探活 → 最终结果
+
+### 🔄 一键套用上次成功配置
+
+- 前端「套用上次成功配置」按钮自动加载最近一条 `status='success'` 的记录
+- 自动复制为新的私有配置（名称追加"(副本)"），可直接保存或微调后启动
+
+### 📡 API 接口
+
+所有接口通过 `x-username` 请求头识别用户。
+
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| GET | `/api/devworkbench/users/me` | 查询当前用户信息 | 全部 |
+| GET | `/api/devworkbench/users` | 查询所有用户 | admin |
+| GET | `/api/devworkbench/configs` | 配置列表（公共+自己私有） | 全部 |
+| POST | `/api/devworkbench/configs` | 新建配置 | 全部（公共需 admin） |
+| PUT | `/api/devworkbench/configs/:id` | 更新配置 | 所有者 / admin |
+| DELETE | `/api/devworkbench/configs/:id` | 删除配置（软删除） | 所有者 / admin |
+| GET | `/api/devworkbench/configs/last-success` | 最近成功配置 | 全部 |
+| GET | `/api/devworkbench/ports/:port/check` | 检测端口可用性 | 全部 |
+| POST | `/api/devworkbench/configs/:id/launch` | 启动服务并执行验真 | 全部 |
+| GET | `/api/devworkbench/processes` | 列出运行中 PID | admin |
+| POST | `/api/devworkbench/processes/:pid/stop` | 停止服务进程 | admin |
+| GET | `/api/devworkbench/verifications` | 验真记录列表 | 全部 |
+| GET | `/api/devworkbench/verifications/:id` | 验真记录详情 | 全部 |
+
+### 📊 数据库表
+
+```sql
+users (
+  id           INTEGER PK
+  username     TEXT UNIQUE
+  role         TEXT    -- admin/user
+  display_name TEXT
+  created_at   TEXT
+)
+
+launch_configs (
+  id                  INTEGER PK
+  name                TEXT
+  scope               TEXT    -- public/private
+  owner_username      TEXT
+  service_type        TEXT    -- frontend/backend
+  command             TEXT
+  cwd                 TEXT
+  fixed_port          INTEGER
+  health_check_url    TEXT
+  startup_timeout_sec INTEGER
+  is_active           INTEGER -- 软删除标记
+  created_at          TEXT
+  updated_at          TEXT
+)
+
+verification_records (
+  id                 INTEGER PK
+  config_id          INTEGER
+  config_name        TEXT
+  operator_username  TEXT
+  pid                INTEGER
+  actual_port        INTEGER
+  status             TEXT    -- idle/starting/running/verifying/success/failed/stopping/stopped
+  page_check_status  TEXT    -- pending/running/success/failed
+  api_check_status   TEXT    -- pending/running/success/failed
+  failure_reason     TEXT
+  timeline           TEXT    -- JSON TimelineEvent[]
+  duration_ms        INTEGER
+  created_at         TEXT
+  completed_at       TEXT
+)
+```
+
+### 🖥 GUI 功能
+
+- 顶部可快速切换用户身份（admin / devuser），直观演示权限差异
+- 运行中的服务卡片：显示 PID、端口、操作人、耗时，管理员可停止
+- 配置列表：表格展示类型、范围、所有者、端口、命令，支持启动/编辑/删除
+  - 无权限的配置显示「只读」标记
+- 验真记录时间线：可展开查看页面探活、接口探活状态和完整事件流
+- 新建/编辑配置弹窗：
+  - 端口输入后自动检测可用性（绿/红反馈）
+  - 非管理员创建公共配置时给出警告并禁用
+
+### 🧪 集成测试
+
+```bash
+node test-devworkbench.mjs
+```
+
+**覆盖 5 大场景：**
+1. 固定端口生效：启动后健康检查命中配置端口
+2. 冲突拦截：端口占用时启动失败，记录失败原因
+3. 权限差异：普通用户无法修改/删除公共配置，管理员可以
+4. 重启后记录保留：验真记录和配置在服务重启后仍可查询
+5. 按保存配置再次启动：可一键套用上次成功配置并启动
 
 ## 架构
 

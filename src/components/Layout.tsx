@@ -7,6 +7,7 @@ import {
   User2,
   ChevronRight,
   X,
+  Rocket,
 } from "lucide-react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAppStore } from "@/store";
@@ -19,6 +20,7 @@ const NAV = [
   { to: "/technicians", label: "技师管理", icon: Wrench },
   { to: "/export", label: "导出中心", icon: FileDown },
   { to: "/audit", label: "审计日志", icon: ScrollText },
+  { to: "/devworkbench", label: "启动验真台", icon: Rocket },
 ];
 
 export default function Layout() {

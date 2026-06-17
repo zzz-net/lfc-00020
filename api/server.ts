@@ -7,7 +7,7 @@ import { recoverStuckBatches } from './services/exportBatch.js';
 /**
  * start server with port
  */
-const PORT = 3088;
+const PORT = Number(process.env.PORT) || 3088;
 
 const server = app.listen(PORT, () => {
   console.log(`Server ready on port ${PORT}`);

@@ -287,3 +287,129 @@ export interface ExportBatch {
   cancelledBy?: string;
   recoveredAt?: string;
 }
+
+export type UserRole = 'admin' | 'user';
+
+export interface User {
+  id: number;
+  username: string;
+  role: UserRole;
+  displayName: string;
+  createdAt: string;
+}
+
+export type LaunchConfigScope = 'public' | 'private';
+
+export type ServiceType = 'frontend' | 'backend';
+
+export interface LaunchConfig {
+  id: number;
+  name: string;
+  scope: LaunchConfigScope;
+  ownerUsername: string;
+  serviceType: ServiceType;
+  command: string;
+  cwd: string;
+  fixedPort: number;
+  healthCheckUrl: string;
+  startupTimeoutSec: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type LaunchStatus =
+  | 'idle'
+  | 'starting'
+  | 'running'
+  | 'verifying'
+  | 'success'
+  | 'failed'
+  | 'stopping'
+  | 'stopped';
+
+export interface ServiceInstance {
+  configId: number;
+  pid: number;
+  actualPort: number;
+  status: LaunchStatus;
+  startedAt: string;
+  stoppedAt?: string;
+}
+
+export type VerificationStepStatus = 'pending' | 'running' | 'success' | 'failed';
+
+export interface TimelineEvent {
+  timestamp: string;
+  event: string;
+  detail?: string;
+}
+
+export interface VerificationRecord {
+  id: number;
+  configId: number;
+  configName: string;
+  operatorUsername: string;
+  pid: number;
+  actualPort: number;
+  status: LaunchStatus;
+  pageCheckStatus: VerificationStepStatus;
+  apiCheckStatus: VerificationStepStatus;
+  failureReason?: string;
+  timeline: TimelineEvent[];
+  durationMs?: number;
+  createdAt: string;
+  completedAt?: string;
+}
+
+export interface PortCheckResult {
+  port: number;
+  isAvailable: boolean;
+  pid?: number;
+  processName?: string;
+  suggestion?: string;
+}
+
+export const USER_ROLE_LABELS: Record<UserRole, string> = {
+  admin: '管理员',
+  user: '普通用户',
+};
+
+export const LAUNCH_STATUS_LABELS: Record<LaunchStatus, string> = {
+  idle: '空闲',
+  starting: '启动中',
+  running: '运行中',
+  verifying: '验真中',
+  success: '验真通过',
+  failed: '启动失败',
+  stopping: '停止中',
+  stopped: '已停止',
+};
+
+export const LAUNCH_STATUS_COLORS: Record<LaunchStatus, string> = {
+  idle: 'slate',
+  starting: 'amber',
+  running: 'sky',
+  verifying: 'violet',
+  success: 'emerald',
+  failed: 'red',
+  stopping: 'orange',
+  stopped: 'slate',
+};
+
+export const SERVICE_TYPE_LABELS: Record<ServiceType, string> = {
+  frontend: '前端',
+  backend: '后端',
+};
+
+export const CONFIG_SCOPE_LABELS: Record<LaunchConfigScope, string> = {
+  public: '公共配置',
+  private: '私有配置',
+};
+
+export const VERIFICATION_STEP_LABELS: Record<VerificationStepStatus, string> = {
+  pending: '待检测',
+  running: '检测中',
+  success: '通过',
+  failed: '失败',
+};

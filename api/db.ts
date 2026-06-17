@@ -161,6 +161,55 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_export_created ON export_batches(created_at);
     CREATE INDEX IF NOT EXISTS idx_snapshot_batch ON export_ticket_snapshots(batch_id);
     CREATE INDEX IF NOT EXISTS idx_snapshot_ticket ON export_ticket_snapshots(ticket_id);
+
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE NOT NULL,
+      role TEXT NOT NULL DEFAULT 'user',
+      display_name TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS launch_configs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      scope TEXT NOT NULL DEFAULT 'private',
+      owner_username TEXT NOT NULL,
+      service_type TEXT NOT NULL,
+      command TEXT NOT NULL,
+      cwd TEXT NOT NULL,
+      fixed_port INTEGER NOT NULL,
+      health_check_url TEXT NOT NULL,
+      startup_timeout_sec INTEGER NOT NULL DEFAULT 60,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS verification_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      config_id INTEGER NOT NULL,
+      config_name TEXT NOT NULL,
+      operator_username TEXT NOT NULL,
+      pid INTEGER,
+      actual_port INTEGER,
+      status TEXT NOT NULL DEFAULT 'idle',
+      page_check_status TEXT NOT NULL DEFAULT 'pending',
+      api_check_status TEXT NOT NULL DEFAULT 'pending',
+      failure_reason TEXT,
+      timeline TEXT NOT NULL,
+      duration_ms INTEGER,
+      created_at TEXT NOT NULL,
+      completed_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_config_owner ON launch_configs(owner_username);
+    CREATE INDEX IF NOT EXISTS idx_config_scope ON launch_configs(scope);
+    CREATE INDEX IF NOT EXISTS idx_config_service_type ON launch_configs(service_type);
+    CREATE INDEX IF NOT EXISTS idx_verification_config ON verification_records(config_id);
+    CREATE INDEX IF NOT EXISTS idx_verification_operator ON verification_records(operator_username);
+    CREATE INDEX IF NOT EXISTS idx_verification_status ON verification_records(status);
+    CREATE INDEX IF NOT EXISTS idx_verification_created ON verification_records(created_at);
   `);
 
   _migrateExportBatches();
@@ -193,6 +242,61 @@ export function initDatabase() {
     `);
     insertTicket.run('WO-2026-0001', '3楼空调不制冷', '研发中心3楼301', '空调开机后不出冷风，已使用5年', '陈主管', '13800000001', 'high', _addDays(2));
     insertTicket.run('WO-2026-0002', '会议室投影仪无法开机', '行政楼2楼大会议室', '按电源键无反应，指示灯不亮', '刘助理', '13800000002', 'medium', _addDays(1));
+  }
+
+  const userCount = db.prepare('SELECT COUNT(*) as c FROM users').get() as { c: number };
+  if (userCount.c === 0) {
+    const insertUser = db.prepare(`
+      INSERT INTO users (username, role, display_name, created_at)
+      VALUES (?, ?, ?, datetime('now'))
+    `);
+    insertUser.run('admin', 'admin', '系统管理员');
+    insertUser.run('devuser', 'user', '开发用户');
+  }
+
+  const configCount = db.prepare('SELECT COUNT(*) as c FROM launch_configs').get() as { c: number };
+  if (configCount.c === 0) {
+    const projectRoot = path.join(__dirname, '..');
+    const insertConfig = db.prepare(`
+      INSERT INTO launch_configs (
+        name, scope, owner_username, service_type, command, cwd,
+        fixed_port, health_check_url, startup_timeout_sec, is_active,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))
+    `);
+    insertConfig.run(
+      '后端开发服务',
+      'public',
+      'admin',
+      'backend',
+      'npm run server:dev',
+      projectRoot,
+      3001,
+      'http://localhost:3001/api/health',
+      30
+    );
+    insertConfig.run(
+      '前端开发服务',
+      'public',
+      'admin',
+      'frontend',
+      'npm run client:dev',
+      projectRoot,
+      5173,
+      'http://localhost:5173/',
+      30
+    );
+    insertConfig.run(
+      '我的个人后端',
+      'private',
+      'devuser',
+      'backend',
+      'npm run server:dev',
+      projectRoot,
+      3002,
+      'http://localhost:3002/api/health',
+      30
+    );
   }
 }
 
