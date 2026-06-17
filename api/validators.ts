@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { Skill, TicketStatus, Urgency } from '../shared/types.js';
+import type { ExportBatchStatus, Skill, TicketStatus, Urgency } from '../shared/types.js';
 
 export const SKILLS: Skill[] = [
   'air_conditioner',
@@ -94,4 +94,23 @@ export const reworkReviewSchema = z.object({
   approved: z.boolean(),
   comment: z.string().min(2, '审批意见至少需要2个字符').max(500, '审批意见不能超过500个字符'),
   operator: z.string().min(1, '操作人不能为空'),
+});
+
+export const EXPORT_BATCH_STATUSES: ExportBatchStatus[] = ['pending', 'processing', 'completed', 'failed', 'cancelled'];
+
+export const createExportBatchSchema = z.object({
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  technicianId: z.coerce.number().int().positive().optional(),
+  status: z.enum(['pending_assign', 'in_progress', 'pending_verify', 'closed'] as [TicketStatus, ...TicketStatus[]]).optional(),
+  operator: z.string().min(1, '操作人不能为空'),
+});
+
+export const cancelExportBatchSchema = z.object({
+  operator: z.string().min(1, '操作人不能为空'),
+});
+
+export const listExportBatchesSchema = z.object({
+  operator: z.string().optional(),
+  status: z.enum([...EXPORT_BATCH_STATUSES] as [ExportBatchStatus, ...ExportBatchStatus[]]).optional(),
 });

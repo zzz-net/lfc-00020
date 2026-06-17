@@ -2,6 +2,8 @@ export type TicketStatus = 'pending_assign' | 'in_progress' | 'pending_verify' |
 
 export type ReworkStatus = 'pending' | 'approved' | 'rejected' | 'withdrawn';
 
+export type ExportBatchStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
+
 export type Urgency = 'low' | 'medium' | 'high' | 'critical';
 
 export type Skill =
@@ -174,3 +176,75 @@ export const TICKET_REQUIRED_SKILLS_MAP: Record<string, Skill[]> = {
   插座: ['electrical'],
   电梯: ['elevator'],
 };
+
+export const EXPORT_BATCH_STATUS_LABELS: Record<ExportBatchStatus, string> = {
+  pending: '等待生成',
+  processing: '生成中',
+  completed: '已完成',
+  failed: '生成失败',
+  cancelled: '已取消',
+};
+
+export const EXPORT_BATCH_STATUS_COLORS: Record<ExportBatchStatus, string> = {
+  pending: 'slate',
+  processing: 'amber',
+  completed: 'emerald',
+  failed: 'red',
+  cancelled: 'slate',
+};
+
+export interface ExportFilters {
+  startDate?: string;
+  endDate?: string;
+  technicianId?: number;
+  status?: TicketStatus;
+}
+
+export interface TicketSnapshot {
+  ticketId: number;
+  ticketNo: string;
+  title: string;
+  location: string;
+  description: string;
+  contactName: string;
+  contactPhone: string;
+  urgency: Urgency;
+  expectedDate: string;
+  status: TicketStatus;
+  technicianId?: number;
+  technicianName?: string;
+  assignedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  reworkStatus?: ReworkStatus;
+  reworkApplicant?: string;
+  reworkReason?: string;
+  reworkReviewer?: string;
+  reworkComment?: string;
+  reworkCreatedAt?: string;
+  reviewedAt?: string;
+  hasStatusDiff?: boolean;
+  hasTechnicianDiff?: boolean;
+  currentStatus?: TicketStatus;
+  currentTechnicianName?: string;
+}
+
+export interface ExportBatch {
+  id: number;
+  batchNo: string;
+  operator: string;
+  filters: ExportFilters;
+  filterSummary: string;
+  ticketIds: number[];
+  status: ExportBatchStatus;
+  totalCount: number;
+  exportedCount: number;
+  failedReason?: string;
+  filePath?: string;
+  fileName?: string;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  cancelledAt?: string;
+  cancelledBy?: string;
+}

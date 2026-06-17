@@ -8,6 +8,11 @@ const dataDir = path.join(__dirname, '..', 'data');
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
+const exportDir = path.join(dataDir, 'exports');
+if (!fs.existsSync(exportDir)) {
+  fs.mkdirSync(exportDir, { recursive: true });
+}
+export { exportDir };
 
 const dbPath = path.join(dataDir, 'app.db');
 export const db = new Database(dbPath);
@@ -92,12 +97,64 @@ export function initDatabase() {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS export_batches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      batch_no TEXT UNIQUE NOT NULL,
+      operator TEXT NOT NULL,
+      filters TEXT NOT NULL,
+      filter_summary TEXT NOT NULL,
+      ticket_ids TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      total_count INTEGER NOT NULL DEFAULT 0,
+      exported_count INTEGER NOT NULL DEFAULT 0,
+      failed_reason TEXT,
+      file_path TEXT,
+      file_name TEXT,
+      created_at TEXT NOT NULL,
+      started_at TEXT,
+      completed_at TEXT,
+      cancelled_at TEXT,
+      cancelled_by TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS export_ticket_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      batch_id INTEGER NOT NULL REFERENCES export_batches(id) ON DELETE CASCADE,
+      ticket_id INTEGER NOT NULL,
+      ticket_no TEXT NOT NULL,
+      title TEXT NOT NULL,
+      location TEXT NOT NULL,
+      description TEXT NOT NULL,
+      contact_name TEXT NOT NULL,
+      contact_phone TEXT NOT NULL,
+      urgency TEXT NOT NULL,
+      expected_date TEXT NOT NULL,
+      status TEXT NOT NULL,
+      technician_id INTEGER,
+      technician_name TEXT,
+      assigned_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      rework_status TEXT,
+      rework_applicant TEXT,
+      rework_reason TEXT,
+      rework_reviewer TEXT,
+      rework_comment TEXT,
+      rework_created_at TEXT,
+      reviewed_at TEXT
+    );
+
     CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
     CREATE INDEX IF NOT EXISTS idx_tickets_technician ON tickets(technician_id);
     CREATE INDEX IF NOT EXISTS idx_audit_ticket ON audit_logs(ticket_id);
     CREATE INDEX IF NOT EXISTS idx_notes_ticket ON notes(ticket_id);
     CREATE INDEX IF NOT EXISTS idx_rework_ticket ON rework_applications(ticket_id);
     CREATE INDEX IF NOT EXISTS idx_rework_status ON rework_applications(status);
+    CREATE INDEX IF NOT EXISTS idx_export_operator ON export_batches(operator);
+    CREATE INDEX IF NOT EXISTS idx_export_status ON export_batches(status);
+    CREATE INDEX IF NOT EXISTS idx_export_created ON export_batches(created_at);
+    CREATE INDEX IF NOT EXISTS idx_snapshot_batch ON export_ticket_snapshots(batch_id);
+    CREATE INDEX IF NOT EXISTS idx_snapshot_ticket ON export_ticket_snapshots(ticket_id);
   `);
 
   const techCount = db.prepare('SELECT COUNT(*) as c FROM technicians').get() as { c: number };
@@ -140,4 +197,14 @@ export function generateTicketNo(): string {
 
 export function now(): string {
   return new Date().toISOString();
+}
+
+export function generateBatchNo(): string {
+  const year = new Date().getFullYear();
+  const month = String(new Date().getMonth() + 1).padStart(2, '0');
+  const day = String(new Date().getDate()).padStart(2, '0');
+  const prefix = `EXP-${year}${month}${day}`;
+  const row = db.prepare('SELECT COUNT(*) as c FROM export_batches WHERE batch_no LIKE ?').get(`${prefix}%`) as { c: number };
+  const seq = String(row.c + 1).padStart(4, '0');
+  return `${prefix}-${seq}`;
 }

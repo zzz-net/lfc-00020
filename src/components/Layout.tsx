@@ -24,7 +24,7 @@ const NAV = [
 export default function Layout() {
   const { toast, currentOperator, setCurrentOperator, clearToast } = useAppStore();
   const [opOpen, setOpOpen] = useState(false);
-  const operators = ["调度员A", "调度员B", "主管C"];
+  const operators = ["管理员", "调度员A", "调度员B", "主管C", "张伟", "李娜", "王强"];
   const loc = useLocation();
   const pageTitle = NAV.find((n) => n.to === loc.pathname)?.label ?? "工单详情";
 

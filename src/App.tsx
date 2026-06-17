@@ -5,6 +5,7 @@ import TicketDetail from "@/pages/TicketDetail";
 import NewTicket from "@/pages/NewTicket";
 import Technicians from "@/pages/Technicians";
 import ExportCenter from "@/pages/Export";
+import ExportBatchDetail from "@/pages/ExportBatchDetail";
 import AuditLog from "@/pages/AuditLog";
 
 export default function App() {
@@ -17,6 +18,7 @@ export default function App() {
           <Route path="/tickets/:id" element={<TicketDetail />} />
           <Route path="/technicians" element={<Technicians />} />
           <Route path="/export" element={<ExportCenter />} />
+          <Route path="/export/batches/:id" element={<ExportBatchDetail />} />
           <Route path="/audit" element={<AuditLog />} />
         </Route>
       </Routes>
