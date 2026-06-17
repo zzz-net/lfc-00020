@@ -58,6 +58,216 @@
 - 返工申请状态、返工申请人、返工申请原因
 - 返工审批人、返工审批意见、返工申请时间、返工审批时间
 
+### ✅ 新增：任务回执与验真中心（导出模块）
+
+把导出这类异步操作做成可追溯的完整模块。**任何一步没验证通过，都不能把状态显示成完成**。
+
+#### 🔐 权限控制
+- **管理员**：可见所有批次，可触发恢复操作
+  - 硬编码集合：`管理员`、`调度员A`、`调度员B`
+- **技师**：仅可见自己创建的批次，自动强制 `technicianId` 为自身
+
+#### 📋 核心设计原则
+
+**1. 任务发起时固化（不可篡改）**
+创建批次时立即写入：
+- `filters` 请求参数（JSON 序列化）
+- `ticketIds` 命中数据 ID 列表（JSON 序列化）
+- `operator` 操作者
+- `totalCount` 预期条数
+- `filterSummary` 筛选条件摘要
+- 批次状态设为 `pending`
+
+**2. 执行完成后验真（三要素一致）**
+只有当以下三项全部匹配，才将状态标记为 `completed`（同时 `verificationStatus = 'verified'`）：
+- ✅ `snapshotCount`（数据库快照条数）
+- ✅ `fileRowCount`（CSV 文件实际行数，排除表头，处理引号内换行）
+- ✅ `fileSha256`（CSV 文件 SHA256 哈希摘要）
+
+任何一项不匹配 → 状态标记为 `failed`，`verificationStatus = 'mismatch'`，记录 `mismatchReason`。
+
+**3. 验真详情字段**
+| 字段 | 说明 |
+|------|------|
+| `snapshotCount` | 数据库快照固化的条数 |
+| `fileRowCount` | CSV 文件实际数据行数 |
+| `fileSizeBytes` | CSV 文件字节数 |
+| `fileSha256` | CSV 文件 SHA256 哈希（64 位十六进制） |
+| `countMatch` | 条数是否一致 |
+| `fileExists` | 文件是否存在 |
+| `verifiedAt` | 验真时间 |
+| `mismatchReason` | 不匹配原因（如有） |
+
+**4. 下载拦截**
+- 只有 `status === 'completed'` 且 `verificationStatus === 'verified'` 的批次才允许下载
+- 未通过验真的批次无法下载，前端隐藏下载按钮
+
+#### 🔄 重试链路
+
+通过 `retry_of_id` 外键字段构建批次间的父子关系链：
+- 取消（`cancelled`）或失败（`failed`）的批次可被重试
+- 重试生成新批次号，保留 `retryOfId` 指向原批次
+- 前端详情页侧栏展示完整重试链路，高亮当前批次
+- 权限隔离：技师在链路中只能看到自己创建的批次
+
+#### 🛡️ 并发冲突拦截
+
+- 5 分钟时间窗口
+- 同一操作人 + 完全相同筛选条件 → 拦截
+- 拦截时返回已存在的批次号
+
+**已修复边界：** 只拦截 `pending` / `processing` 状态，不拦截 `completed` / `cancelled` / `failed`。
+
+#### ⏰ 服务重启恢复
+
+服务启动时自动执行 `recoverStuckBatches()`：
+- **`pending` 状态**：自动重新入队执行（写入 `recoveredAt` 时间戳）
+- **`processing` 状态**：标记为 `failed`，原因："服务重启，任务中断"
+- 所有恢复操作写入 `export_recover` 审计日志
+
+日志输出示例：
+```
+[任务恢复] 启动恢复完成：pending自动重试 2 个，processing标记失败 1 个
+```
+
+管理员也可通过 API 手动触发恢复：
+```http
+POST /api/export/recover
+Body: { "operator": "调度员A" }
+```
+
+#### 🚫 未开始任务取消
+
+- 仅 `pending` 状态可取消
+- 取消后状态变为 `cancelled`，记录 `cancelledAt` 和 `cancelledBy`
+- 已取消的批次不可再次取消
+- 取消操作写入 `export_cancel` 审计日志
+
+#### 📝 审计日志全链路
+
+所有导出相关操作写入 `audit_logs` 表：
+
+| Action | 触发时机 |
+|--------|----------|
+| `export_create` | 创建导出批次 |
+| `export_cancel` | 取消导出批次 |
+| `export_retry` | 重试导出批次 |
+| `export_complete` | 导出成功完成（afterData 包含 SHA256、文件大小等） |
+| `export_fail` | 导出失败或验真不通过 |
+| `export_recover` | 服务重启恢复任务 |
+
+审计日志页面前端使用不同颜色区分各类导出操作。
+
+#### 🖥 GUI 展示
+
+**导出中心列表页：**
+- 新增"验真"列，显示三种状态徽章
+  - 🟡 `pending` 待验真
+  - 🟢 `verified` 验真通过
+  - 🔴 `mismatch` 验真不通过
+
+**导出详情页：**
+- 顶部同时显示状态徽章和验真徽章
+- 新增"验真详情"卡片：快照条数、文件行数、文件大小、SHA256（可复制）、条数匹配、文件存在、验真时间、不匹配原因
+- 侧栏"重试链路"卡片：展示完整链路，高亮当前批次
+- 新增"重新验真"按钮（`completed` 状态可见）
+- 仅验真通过才显示下载按钮
+- 若有 `recoveredAt` 显示恢复提示
+
+**审计日志页：**
+- 6 种导出操作使用 teal/rose/amber/emerald/red/cyan 色系区分
+
+#### 📡 API 接口
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/export/batches` | 批次列表（自动权限过滤） |
+| POST | `/api/export/batches` | 创建导出批次 |
+| GET | `/api/export/batches/:id` | 批次详情 |
+| POST | `/api/export/batches/:id/cancel` | 取消批次 |
+| POST | `/api/export/batches/:id/retry` | 重试批次 |
+| GET | `/api/export/batches/:id/verification` | 查询验真详情 |
+| POST | `/api/export/batches/:id/verify` | 手动触发重新验真 |
+| GET | `/api/export/batches/:id/retry-chain` | 查询重试链路（自动权限过滤） |
+| GET | `/api/export/batches/:id/download` | 下载文件（验真拦截） |
+| GET | `/api/export/batches/:id/snapshots` | 查询数据快照与差异 |
+| POST | `/api/export/recover` | 管理员手动触发恢复 |
+
+#### 📊 数据库表结构
+
+`export_batches` 表新增列：
+```sql
+file_sha256         TEXT       -- CSV 文件 SHA256 哈希
+file_size_bytes     INTEGER    -- CSV 文件字节数
+file_row_count      INTEGER    -- CSV 文件数据行数
+verification_status TEXT DEFAULT 'pending'  -- pending/verified/mismatch
+retry_of_id         INTEGER REFERENCES export_batches(id)  -- 重试父批次
+recovered_at        TEXT       -- 恢复时间
+```
+
+**向后兼容：** 通过 `_columnExists()` + `ALTER TABLE ADD COLUMN` 实现旧库平滑升级。
+
+#### 🧪 集成测试（必跑）
+
+```bash
+node test-task-receipt-center.mjs
+```
+
+**40 项测试全部覆盖：**
+
+1. **权限测试（8 项）**
+   - 不存在用户无法创建
+   - 管理员可创建、可查看所有批次
+   - 技师可创建、仅可见自己的批次
+   - 技师不可触发恢复接口
+   - 管理员可触发恢复接口
+
+2. **重复提交拦截（3 项）**
+   - 首次创建成功
+   - 5 分钟内同条件重复创建被拦截
+   - 拦截错误提示包含批次号
+
+3. **未开始任务取消（4 项）**
+   - pending 状态可被取消
+   - 取消后状态为 cancelled
+   - cancelledBy 被正确记录
+   - 已取消的批次不可再次取消
+
+4. **验真与结果条数一致性（11 项）**
+   - 异步导出任务在合理时间内完成
+   - completed 状态必须是验真通过的（verified）
+   - 验真接口返回快照条数与预期一致
+   - 验真接口返回文件条数与预期一致
+   - 验真接口 countMatch=true
+   - SHA256 为 64 位十六进制字符串
+   - fileSizeBytes > 0
+   - 验真通过的批次可下载
+   - exportedCount 等于 totalCount（验真一致性）
+   - 批次详情包含 fileRowCount
+   - 批次详情包含 fileSha256
+
+5. **重试链路（7 项）**
+   - cancelled 状态可重试并生成新批次
+   - 重试新批次有 retryOfId 指向原批次
+   - 管理员重试链路包含原批次和新批次
+   - 链路中第一个为原批次
+   - 链路中包含新批次
+   - 技师只能看到链路中自己创建的批次（权限隔离）
+   - 技师看到的是自己创建的原批次
+
+6. **审计日志落库（5 项）**
+   - 审计日志接口返回成功
+   - 包含 export_create 动作
+   - 包含 export_cancel 动作
+   - 包含 export_retry 动作
+   - export_complete 审计记录包含 afterData（有 SHA256 等信息）
+
+7. **服务重启恢复（1 项）**
+   - 管理员手动触发恢复接口返回正确结构
+
+8. **技师自动过滤（1 项）**
+   - 技师创建时传入的 technicianId 会被覆盖为自身
+
 ### ❌ 关闭后不能改派 / 不能直接变更状态
 
 - 已关闭工单如需重新派单或调整，可选择：
@@ -127,6 +337,27 @@ node test-backend-rework.mjs
 ### 持久化与一致性
 16. SQLite 持久化：重启后申请状态与审计不丢失 ✅
 17. CSV 导出含返工申请 7 列字段，数据一致 ✅
+
+### 导出批次快照功能（`test-backend-export-batch.mjs`，33 项）
+```bash
+node test-backend-export-batch.mjs
+```
+18. **权限控制**：管理员创建成功，非法操作人被拒（400）✅
+19. **权限隔离**：技师创建时自动注入 `technicianId` 限制，仅能看自己批次；管理员可看全部 ✅
+20. **权限校验**：技师查看管理员的批次被拒绝（400）✅
+21. **取消机制**：pending 批次可取消，状态变为 cancelled ✅
+22. **取消幂等**：已取消批次再次取消失败（400）✅
+23. **重试机制**：取消/失败批次可重试，生成新批次号 ✅
+24. **重复拦截**：同一操作人 5 分钟内相同条件重复提交被拦截，错误信息含原因 ✅
+25. **状态流转**：pending → processing → completed 自动推进 ✅
+26. **数量一致**：exportedCount === totalCount，文件名和文件路径存在 ✅
+27. **文件下载**：completed 批次可下载 CSV，内容包含中文表头 ✅
+28. **快照存在**：获取快照成功，条数>0，含工单编号、标题、差异标记字段 ✅
+29. **差异标记**：工单状态或技师变更后，快照接口返回 `hasStatusDiff`/`hasTechnicianDiff` 标记 ✅
+30. **持久化**：多次操作后批次记录仍可查询到 completed 和 cancelled 状态 ✅
+31. **快照落库**：快照记录持久化保存 ✅
+32. **数据一致性**：批次总数 === 快照条数 === CSV 数据行数 ✅
+33. **边界拦截**：cancelled 批次不能下载（400）✅
 
 GUI 验证点：
 - 详情页 `status=closed` 时：**撤销按钮可见**、派单面板禁用、无状态推进按钮

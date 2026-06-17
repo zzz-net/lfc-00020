@@ -14,7 +14,10 @@ import {
   getBatchSnapshotsWithDiff,
   getExportBatchById,
   getExportFilePath,
+  getExportVerification,
+  getRetryChain,
   listExportBatches,
+  recoverStuckBatches,
   retryExportBatch,
 } from '../services/exportBatch.js';
 
@@ -130,6 +133,61 @@ router.get('/batches/:id/download', (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
     const stream = fs.createReadStream(filePath);
     stream.pipe(res);
+  } catch (err) {
+    _handleError(res, err);
+  }
+});
+
+router.get('/batches/:id/verification', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: '无效的批次ID' });
+    const operator = (req.query.operator as string) || '';
+    if (!operator) return res.status(400).json({ error: '操作人不能为空' });
+    const verification = getExportVerification(id, operator);
+    res.json({ data: verification });
+  } catch (err) {
+    _handleError(res, err);
+  }
+});
+
+router.post('/batches/:id/verify', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: '无效的批次ID' });
+    const operator = (req.body?.operator as string) || '';
+    if (!operator) return res.status(400).json({ error: '操作人不能为空' });
+    const verification = getExportVerification(id, operator);
+    const batch = getExportBatchById(id, operator, true);
+    res.json({ data: { verification, batch } });
+  } catch (err) {
+    _handleError(res, err);
+  }
+});
+
+router.get('/batches/:id/retry-chain', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: '无效的批次ID' });
+    const operator = (req.query.operator as string) || '';
+    if (!operator) return res.status(400).json({ error: '操作人不能为空' });
+    const chain = getRetryChain(id, operator);
+    res.json({ data: chain });
+  } catch (err) {
+    _handleError(res, err);
+  }
+});
+
+router.post('/recover', (req, res) => {
+  try {
+    const operator = (req.body?.operator as string) || '';
+    if (!operator) return res.status(400).json({ error: '操作人不能为空' });
+    const ADMIN_OPERATORS = new Set(['管理员', '调度员A', '调度员B']);
+    if (!ADMIN_OPERATORS.has(operator)) {
+      return res.status(403).json({ error: '仅管理员可触发恢复' });
+    }
+    const result = recoverStuckBatches();
+    res.json({ data: result });
   } catch (err) {
     _handleError(res, err);
   }

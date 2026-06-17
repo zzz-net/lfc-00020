@@ -110,11 +110,17 @@ export function initDatabase() {
       failed_reason TEXT,
       file_path TEXT,
       file_name TEXT,
+      file_sha256 TEXT,
+      file_size_bytes INTEGER,
+      file_row_count INTEGER,
+      verification_status TEXT NOT NULL DEFAULT 'pending',
+      retry_of_id INTEGER REFERENCES export_batches(id),
       created_at TEXT NOT NULL,
       started_at TEXT,
       completed_at TEXT,
       cancelled_at TEXT,
-      cancelled_by TEXT
+      cancelled_by TEXT,
+      recovered_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS export_ticket_snapshots (
@@ -157,6 +163,14 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_snapshot_ticket ON export_ticket_snapshots(ticket_id);
   `);
 
+  _migrateExportBatches();
+
+  try {
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_export_retry_of ON export_batches(retry_of_id)').run();
+  } catch (e) {
+    console.warn('创建 idx_export_retry_of 索引失败:', e);
+  }
+
   const techCount = db.prepare('SELECT COUNT(*) as c FROM technicians').get() as { c: number };
   if (techCount.c === 0) {
     const insertTech = db.prepare(`
@@ -179,6 +193,31 @@ export function initDatabase() {
     `);
     insertTicket.run('WO-2026-0001', '3楼空调不制冷', '研发中心3楼301', '空调开机后不出冷风，已使用5年', '陈主管', '13800000001', 'high', _addDays(2));
     insertTicket.run('WO-2026-0002', '会议室投影仪无法开机', '行政楼2楼大会议室', '按电源键无反应，指示灯不亮', '刘助理', '13800000002', 'medium', _addDays(1));
+  }
+}
+
+function _columnExists(tableName: string, columnName: string): boolean {
+  const rows = db.prepare(`PRAGMA table_info(${tableName})`).all() as any[];
+  return rows.some((r) => r.name === columnName);
+}
+
+function _migrateExportBatches(): void {
+  const columnsToAdd = [
+    { name: 'file_sha256', def: 'TEXT' },
+    { name: 'file_size_bytes', def: 'INTEGER' },
+    { name: 'file_row_count', def: 'INTEGER' },
+    { name: 'verification_status', def: "TEXT NOT NULL DEFAULT 'pending'" },
+    { name: 'retry_of_id', def: 'INTEGER REFERENCES export_batches(id)' },
+    { name: 'recovered_at', def: 'TEXT' },
+  ];
+  for (const col of columnsToAdd) {
+    if (!_columnExists('export_batches', col.name)) {
+      try {
+        db.prepare(`ALTER TABLE export_batches ADD COLUMN ${col.name} ${col.def}`).run();
+      } catch (e) {
+        console.warn(`迁移列 ${col.name} 失败:`, e);
+      }
+    }
   }
 }
 

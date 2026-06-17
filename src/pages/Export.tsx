@@ -4,7 +4,10 @@ import {
   EXPORT_BATCH_STATUS_COLORS,
   EXPORT_BATCH_STATUS_LABELS,
   STATUS_LABELS,
+  VERIFICATION_STATUS_COLORS,
+  VERIFICATION_STATUS_LABELS,
 } from "../../shared/types";
+import type { VerificationStatus } from "../../shared/types";
 import { useAppStore } from "@/store";
 import {
   FileDown,
@@ -270,6 +273,7 @@ export default function ExportCenter() {
                 <th className="px-4 py-2 text-left">批次号</th>
                 <th className="px-4 py-2 text-left">筛选条件</th>
                 <th className="px-4 py-2 text-left">状态</th>
+                <th className="px-4 py-2 text-left">验真</th>
                 <th className="px-4 py-2 text-left">总数/已导出</th>
                 <th className="px-4 py-2 text-left">创建人</th>
                 <th className="px-4 py-2 text-left">创建时间</th>
@@ -285,6 +289,13 @@ export default function ExportCenter() {
                   </td>
                   <td className="px-4 py-2">
                     <StatusBadge status={b.status} />
+                  </td>
+                  <td className="px-4 py-2">
+                    {b.status === "completed" && b.verificationStatus ? (
+                      <VerificationBadge status={b.verificationStatus as VerificationStatus} />
+                    ) : (
+                      <span className="text-[11px] text-slate-400">-</span>
+                    )}
                   </td>
                   <td className="px-4 py-2 text-slate-600">
                     {b.totalCount} / {b.exportedCount}
@@ -340,7 +351,7 @@ export default function ExportCenter() {
               ))}
               {batches.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="py-16 text-center text-slate-400">
+                  <td colSpan={8} className="py-16 text-center text-slate-400">
                     暂无导出批次
                   </td>
                 </tr>
@@ -428,6 +439,33 @@ function StatusBadge({ status }: { status: ExportBatchStatus }) {
       )}
     >
       <Icon className={clsx("h-3 w-3", status === "processing" && "animate-spin")} />
+      {label}
+    </span>
+  );
+}
+
+function VerificationBadge({ status }: { status: VerificationStatus }) {
+  const label = VERIFICATION_STATUS_LABELS[status];
+  const color = VERIFICATION_STATUS_COLORS[status];
+  const icons: Record<string, any> = {
+    pending: Clock,
+    verified: CheckCircle2,
+    mismatch: AlertCircle,
+  };
+  const Icon = icons[status] ?? Clock;
+  const colorMap: Record<string, string> = {
+    slate: "bg-slate-100 text-slate-700",
+    emerald: "bg-emerald-100 text-emerald-700",
+    red: "bg-red-100 text-red-700",
+  };
+  return (
+    <span
+      className={clsx(
+        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
+        colorMap[color] ?? "bg-slate-100 text-slate-700"
+      )}
+    >
+      <Icon className="h-3 w-3" />
       {label}
     </span>
   );

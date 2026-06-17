@@ -30,7 +30,13 @@ export type AuditAction =
   | 'rework_withdraw'
   | 'rework_approve'
   | 'rework_reject'
-  | 'rework_status_rollback';
+  | 'rework_status_rollback'
+  | 'export_create'
+  | 'export_cancel'
+  | 'export_retry'
+  | 'export_complete'
+  | 'export_fail'
+  | 'export_recover';
 
 export interface Technician {
   id: number;
@@ -229,6 +235,31 @@ export interface TicketSnapshot {
   currentTechnicianName?: string;
 }
 
+export type VerificationStatus = 'pending' | 'verified' | 'mismatch';
+
+export const VERIFICATION_STATUS_LABELS: Record<VerificationStatus, string> = {
+  pending: '待验真',
+  verified: '验真通过',
+  mismatch: '验真不通过',
+};
+
+export const VERIFICATION_STATUS_COLORS: Record<VerificationStatus, string> = {
+  pending: 'slate',
+  verified: 'emerald',
+  mismatch: 'red',
+};
+
+export interface ExportVerificationDetail {
+  snapshotCount: number;
+  fileRowCount: number;
+  fileSizeBytes: number;
+  fileSha256: string;
+  countMatch: boolean;
+  fileExists: boolean;
+  verifiedAt?: string;
+  mismatchReason?: string;
+}
+
 export interface ExportBatch {
   id: number;
   batchNo: string;
@@ -242,9 +273,17 @@ export interface ExportBatch {
   failedReason?: string;
   filePath?: string;
   fileName?: string;
+  fileSha256?: string;
+  fileSizeBytes?: number;
+  fileRowCount?: number;
+  verificationStatus?: VerificationStatus;
+  verificationDetail?: ExportVerificationDetail;
+  retryOfId?: number;
+  retryChain?: ExportBatch[];
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
   cancelledAt?: string;
   cancelledBy?: string;
+  recoveredAt?: string;
 }

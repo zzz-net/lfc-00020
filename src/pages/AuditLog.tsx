@@ -13,6 +13,12 @@ const ACTION_LABEL: Record<string, { label: string; cls: string }> = {
   technician_update: { label: "更新技师", cls: "bg-sky-100 text-sky-700 border-sky-200" },
   technician_delete: { label: "删除技师", cls: "bg-red-100 text-red-700 border-red-200" },
   vacation_create: { label: "休假设置", cls: "bg-indigo-100 text-indigo-700 border-indigo-200" },
+  export_create: { label: "导出创建", cls: "bg-teal-100 text-teal-700 border-teal-200" },
+  export_cancel: { label: "导出取消", cls: "bg-rose-100 text-rose-700 border-rose-200" },
+  export_retry: { label: "导出重试", cls: "bg-amber-100 text-amber-700 border-amber-200" },
+  export_complete: { label: "导出完成", cls: "bg-emerald-100 text-emerald-700 border-emerald-200" },
+  export_fail: { label: "导出失败", cls: "bg-red-100 text-red-700 border-red-200" },
+  export_recover: { label: "导出恢复", cls: "bg-cyan-100 text-cyan-700 border-cyan-200" },
 };
 
 export default function AuditLog() {

@@ -6,6 +6,8 @@ import type {
   TicketSnapshot,
   TicketStatus,
   Technician,
+  VerificationStatus,
+  ExportVerificationDetail,
 } from '../../shared/types.js';
 import {
   REWORK_STATUS_LABELS,
@@ -15,6 +17,8 @@ import {
 } from '../../shared/types.js';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
+import { addAuditLog } from './audit.js';
 
 const ADMIN_OPERATORS = new Set(['管理员', '调度员A', '调度员B']);
 
@@ -50,6 +54,30 @@ function _escape(v: unknown): string {
   return s;
 }
 
+function _sha256File(filePath: string): string {
+  const hash = crypto.createHash('sha256');
+  const data = fs.readFileSync(filePath);
+  hash.update(data);
+  return hash.digest('hex');
+}
+
+function _countCsvRows(filePath: string): number {
+  const content = fs.readFileSync(filePath, 'utf8');
+  const lines = content.split(/\r?\n/);
+  let count = 0;
+  let inQuotes = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (i === 0) continue;
+    for (const ch of line) {
+      if (ch === '"') inQuotes = !inQuotes;
+    }
+    if (!inQuotes && line.trim().length > 0) count++;
+    else if (inQuotes) continue;
+  }
+  return count;
+}
+
 function _rowToExportBatch(row: any): ExportBatch {
   return {
     id: row.id,
@@ -64,11 +92,17 @@ function _rowToExportBatch(row: any): ExportBatch {
     failedReason: row.failed_reason,
     filePath: row.file_path,
     fileName: row.file_name,
+    fileSha256: row.file_sha256,
+    fileSizeBytes: row.file_size_bytes,
+    fileRowCount: row.file_row_count,
+    verificationStatus: (row.verification_status as VerificationStatus) || 'pending',
+    retryOfId: row.retry_of_id ?? undefined,
     createdAt: row.created_at,
     startedAt: row.started_at,
     completedAt: row.completed_at,
     cancelledAt: row.cancelled_at,
     cancelledBy: row.cancelled_by,
+    recoveredAt: row.recovered_at ?? undefined,
   };
 }
 
@@ -140,7 +174,7 @@ export function checkDuplicateSubmission(operator: string, filters: ExportFilter
   const rows = db
     .prepare(
       `SELECT * FROM export_batches 
-       WHERE operator = ? AND created_at >= ? AND status NOT IN ('cancelled', 'failed')
+       WHERE operator = ? AND created_at >= ? AND status IN ('pending', 'processing')
        ORDER BY created_at DESC`
     )
     .all(operator, fiveMinutesAgo) as any[];
@@ -162,8 +196,9 @@ export function checkDuplicateSubmission(operator: string, filters: ExportFilter
 export function createExportBatch(params: {
   operator: string;
   filters: ExportFilters;
+  retryOfId?: number;
 }): ExportBatch {
-  const { operator, filters } = params;
+  const { operator, filters, retryOfId } = params;
 
   if (!_isAdmin(operator) && !_isTechnicianName(operator)) {
     throw new Error('操作人不存在');
@@ -187,13 +222,15 @@ export function createExportBatch(params: {
   const filterSummary = _buildFilterSummary(effectiveFilters);
   const createdAt = now();
 
+  let newBatchId: number;
+
   const tx = db.transaction(() => {
     const info = db
       .prepare(
         `INSERT INTO export_batches (
           batch_no, operator, filters, filter_summary, ticket_ids, 
-          status, total_count, exported_count, created_at
-        ) VALUES (?, ?, ?, ?, ?, 'pending', ?, 0, ?)`
+          status, total_count, exported_count, verification_status, retry_of_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, 'pending', ?, 0, 'pending', ?, ?)`
       )
       .run(
         batchNo,
@@ -202,6 +239,7 @@ export function createExportBatch(params: {
         filterSummary,
         JSON.stringify(ticketIds),
         ticketIds.length,
+        retryOfId ?? null,
         createdAt
       );
     const batchId = Number(info.lastInsertRowid);
@@ -252,20 +290,84 @@ export function createExportBatch(params: {
         t.reviewed_at
       );
     }
+    newBatchId = batchId;
     return batchId;
   });
 
-  const batchId = tx();
+  tx();
+
+  addAuditLog({
+    operator,
+    action: retryOfId ? 'export_retry' : 'export_create',
+    description: retryOfId
+      ? `重新创建导出批次 ${batchNo}（基于 #${retryOfId}），命中 ${ticketIds.length} 条工单`
+      : `创建导出批次 ${batchNo}，命中 ${ticketIds.length} 条工单，条件：${filterSummary}`,
+    afterData: { batchNo, filterSummary, ticketCount: ticketIds.length, retryOfId },
+  });
 
   setTimeout(() => {
     try {
-      processExportBatch(batchId);
+      processExportBatch(newBatchId);
     } catch (e) {
       console.error('导出批次后台处理失败:', e);
     }
   }, 300);
 
-  return getExportBatchById(batchId, operator)!;
+  return getExportBatchById(newBatchId, operator)!;
+}
+
+export function verifyExportBatch(batchId: number): ExportVerificationDetail {
+  const batchRow = db.prepare('SELECT * FROM export_batches WHERE id = ?').get(batchId) as any;
+  if (!batchRow) throw new Error('导出批次不存在');
+
+  const snapshotCount = batchRow.total_count;
+  const result: ExportVerificationDetail = {
+    snapshotCount,
+    fileRowCount: 0,
+    fileSizeBytes: 0,
+    fileSha256: '',
+    countMatch: false,
+    fileExists: false,
+    verifiedAt: now(),
+  };
+
+  if (!batchRow.file_path || !fs.existsSync(batchRow.file_path)) {
+    result.mismatchReason = '导出文件不存在';
+    db.prepare(
+      "UPDATE export_batches SET verification_status = 'mismatch' WHERE id = ?"
+    ).run(batchId);
+    return result;
+  }
+
+  try {
+    result.fileExists = true;
+    result.fileSizeBytes = fs.statSync(batchRow.file_path).size;
+    result.fileSha256 = _sha256File(batchRow.file_path);
+    result.fileRowCount = _countCsvRows(batchRow.file_path);
+    result.countMatch = result.fileRowCount === snapshotCount;
+
+    const newStatus: VerificationStatus = result.countMatch ? 'verified' : 'mismatch';
+    if (!result.countMatch) {
+      result.mismatchReason = `条数不一致：快照 ${snapshotCount} 条，文件实际 ${result.fileRowCount} 行`;
+    }
+
+    db.prepare(
+      `UPDATE export_batches SET 
+        verification_status = ?, 
+        file_sha256 = ?, 
+        file_size_bytes = ?, 
+        file_row_count = ? 
+      WHERE id = ?`
+    ).run(newStatus, result.fileSha256, result.fileSizeBytes, result.fileRowCount, batchId);
+
+    return result;
+  } catch (err: any) {
+    result.mismatchReason = `验真异常：${err?.message ?? String(err)}`;
+    db.prepare(
+      "UPDATE export_batches SET verification_status = 'mismatch' WHERE id = ?"
+    ).run(batchId);
+    return result;
+  }
 }
 
 export function processExportBatch(batchId: number): void {
@@ -337,15 +439,86 @@ export function processExportBatch(batchId: number): void {
     fs.writeFileSync(filePath, csv, 'utf8');
 
     db.prepare(
-      "UPDATE export_batches SET status = 'completed', exported_count = ?, file_path = ?, file_name = ?, completed_at = ? WHERE id = ?"
+      "UPDATE export_batches SET exported_count = ?, file_path = ?, file_name = ?, completed_at = ? WHERE id = ?"
     ).run(snapshotRows.length, filePath, fileName, now(), batchId);
+
+    const verification = verifyExportBatch(batchId);
+
+    if (verification.countMatch) {
+      db.prepare("UPDATE export_batches SET status = 'completed' WHERE id = ?").run(batchId);
+      addAuditLog({
+        operator: batchRow.operator,
+        action: 'export_complete',
+        description: `导出批次 ${batchRow.batch_no} 完成并验真通过，共 ${snapshotRows.length} 条，文件SHA256: ${verification.fileSha256.slice(0, 16)}...`,
+        afterData: { batchNo: batchRow.batch_no, exportedCount: snapshotRows.length, fileSha256: verification.fileSha256 },
+      });
+    } else {
+      db.prepare(
+        "UPDATE export_batches SET status = 'failed', failed_reason = ? WHERE id = ?"
+      ).run(`验真失败：${verification.mismatchReason}`, batchId);
+      addAuditLog({
+        operator: batchRow.operator,
+        action: 'export_fail',
+        description: `导出批次 ${batchRow.batch_no} 验真失败：${verification.mismatchReason}`,
+        afterData: { batchNo: batchRow.batch_no, mismatchReason: verification.mismatchReason },
+      });
+    }
   } catch (err: any) {
+    const reason = err?.message ?? String(err);
     db.prepare("UPDATE export_batches SET status = 'failed', failed_reason = ?, completed_at = ? WHERE id = ?").run(
-      err?.message ?? String(err),
+      reason,
       now(),
       batchId
     );
+    addAuditLog({
+      operator: batchRow.operator,
+      action: 'export_fail',
+      description: `导出批次 ${batchRow.batch_no} 执行失败：${reason}`,
+      afterData: { batchNo: batchRow.batch_no, failedReason: reason },
+    });
   }
+}
+
+export function recoverStuckBatches(): { recovered: number; failed: number } {
+  const stuckRows = db
+    .prepare("SELECT * FROM export_batches WHERE status IN ('pending', 'processing') ORDER BY id")
+    .all() as any[];
+
+  let recovered = 0;
+  let failed = 0;
+
+  for (const row of stuckRows) {
+    try {
+      db.prepare("UPDATE export_batches SET recovered_at = ? WHERE id = ?").run(now(), row.id);
+      if (row.status === 'pending') {
+        addAuditLog({
+          operator: row.operator,
+          action: 'export_recover',
+          description: `服务重启恢复：导出批次 ${row.batch_no}（状态: pending）重新进入处理队列`,
+          afterData: { batchNo: row.batch_no, fromStatus: row.status },
+        });
+        processExportBatch(row.id);
+        recovered++;
+      } else if (row.status === 'processing') {
+        const reason = '服务重启中断，processing状态未完成';
+        db.prepare(
+          "UPDATE export_batches SET status = 'failed', failed_reason = ?, completed_at = ? WHERE id = ?"
+        ).run(reason, now(), row.id);
+        addAuditLog({
+          operator: row.operator,
+          action: 'export_recover',
+          description: `服务重启恢复：导出批次 ${row.batch_no}（状态: processing）标记为失败，可手动重试`,
+          afterData: { batchNo: row.batch_no, fromStatus: 'processing', toStatus: 'failed' },
+        });
+        failed++;
+      }
+    } catch (e) {
+      console.error(`恢复批次 #${row.id} 失败:`, e);
+      failed++;
+    }
+  }
+
+  return { recovered, failed };
 }
 
 export function listExportBatches(params: {
@@ -370,7 +543,7 @@ export function listExportBatches(params: {
   return rows.map(_rowToExportBatch);
 }
 
-export function getExportBatchById(id: number, operator: string): ExportBatch | null {
+export function getExportBatchById(id: number, operator: string, includeVerification = false): ExportBatch | null {
   const row = db.prepare('SELECT * FROM export_batches WHERE id = ?').get(id) as any;
   if (!row) return null;
 
@@ -378,7 +551,26 @@ export function getExportBatchById(id: number, operator: string): ExportBatch | 
     throw new Error('无权查看此导出批次');
   }
 
-  return _rowToExportBatch(row);
+  const batch = _rowToExportBatch(row);
+
+  if (includeVerification && batch.status === 'completed' && batch.filePath) {
+    batch.verificationDetail = {
+      snapshotCount: batch.totalCount,
+      fileRowCount: batch.fileRowCount ?? 0,
+      fileSizeBytes: batch.fileSizeBytes ?? 0,
+      fileSha256: batch.fileSha256 ?? '',
+      countMatch: batch.fileRowCount === batch.totalCount,
+      fileExists: batch.filePath ? fs.existsSync(batch.filePath) : false,
+    };
+  }
+
+  return batch;
+}
+
+export function getExportVerification(batchId: number, operator: string): ExportVerificationDetail {
+  const batch = getExportBatchById(batchId, operator);
+  if (!batch) throw new Error('导出批次不存在');
+  return verifyExportBatch(batchId);
 }
 
 export function getBatchSnapshotsWithDiff(batchId: number, operator: string): TicketSnapshot[] {
@@ -411,6 +603,45 @@ export function getBatchSnapshotsWithDiff(batchId: number, operator: string): Ti
   });
 }
 
+export function getRetryChain(batchId: number, operator: string): ExportBatch[] {
+  const currentRow = db.prepare('SELECT * FROM export_batches WHERE id = ?').get(batchId) as any;
+  if (!currentRow) throw new Error('导出批次不存在');
+
+  const isAdmin = _isAdmin(operator);
+  const canView = (row: any): boolean => isAdmin || row.operator === operator;
+
+  const chain: ExportBatch[] = [];
+
+  let cursorId: number | undefined = currentRow.retry_of_id ?? undefined;
+  while (cursorId) {
+    const prev = db.prepare('SELECT * FROM export_batches WHERE id = ?').get(cursorId) as any;
+    if (!prev) break;
+    if (canView(prev)) {
+      chain.unshift(_rowToExportBatch(prev));
+    }
+    cursorId = prev.retry_of_id ?? undefined;
+  }
+
+  if (canView(currentRow)) {
+    chain.push(_rowToExportBatch(currentRow));
+  }
+
+  const addNext = (parentId: number) => {
+    const nextRows = db
+      .prepare('SELECT * FROM export_batches WHERE retry_of_id = ? ORDER BY id')
+      .all(parentId) as any[];
+    for (const r of nextRows) {
+      if (canView(r)) {
+        chain.push(_rowToExportBatch(r));
+      }
+      addNext(r.id);
+    }
+  };
+  addNext(currentRow.id);
+
+  return chain;
+}
+
 export function cancelExportBatch(id: number, operator: string): ExportBatch {
   const row = db.prepare('SELECT * FROM export_batches WHERE id = ?').get(id) as any;
   if (!row) throw new Error('导出批次不存在');
@@ -429,6 +660,14 @@ export function cancelExportBatch(id: number, operator: string): ExportBatch {
     id
   );
 
+  addAuditLog({
+    operator,
+    action: 'export_cancel',
+    description: `取消导出批次 ${row.batch_no}`,
+    beforeData: { batchNo: row.batch_no, status: row.status },
+    afterData: { status: 'cancelled' },
+  });
+
   return getExportBatchById(id, operator)!;
 }
 
@@ -445,13 +684,14 @@ export function retryExportBatch(id: number, operator: string): ExportBatch {
   }
 
   const filters: ExportFilters = JSON.parse(row.filters);
-  return createExportBatch({ operator, filters });
+  return createExportBatch({ operator, filters, retryOfId: id });
 }
 
 export function getExportFilePath(id: number, operator: string): { path: string; fileName: string } {
   const batch = getExportBatchById(id, operator);
   if (!batch) throw new Error('导出批次不存在');
   if (batch.status !== 'completed') throw new Error('此批次尚未生成完成');
+  if (batch.verificationStatus !== 'verified') throw new Error('此批次未通过验真，无法下载');
   if (!batch.filePath || !batch.fileName) throw new Error('文件路径不存在');
   if (!fs.existsSync(batch.filePath)) throw new Error('导出文件已丢失');
   return { path: batch.filePath, fileName: batch.fileName };
